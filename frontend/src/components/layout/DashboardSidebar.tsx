@@ -29,6 +29,7 @@ export const DashboardSidebar: React.FC = () => {
     { to: '/dashboard', label: 'Dashboard', icon: Home },
     { to: '/inbox', label: 'Inbox', icon: Mail, badge: unreadCount > 0 ? unreadCount : undefined },
     { to: '/compose', label: 'Compose with AI', icon: PenSquare },
+    { to: '/drafts', label: 'Drafts', icon: FileText, },
     { to: '/scheduled', label: 'Scheduled', icon: Calendar },
     { to: '/sent', label: 'Sent', icon: Send },
     { to: '/tracking', label: 'Tracking', icon: BarChart2 },

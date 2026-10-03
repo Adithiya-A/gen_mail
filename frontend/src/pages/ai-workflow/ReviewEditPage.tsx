@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import {
+  useNavigate,
+  Link,
+  useLocation,
+} from 'react-router-dom';
+import { createEmail, updateEmail } from '../../services/emailService';
 import {
   Send,
   User,
@@ -14,17 +19,97 @@ import { RichTextEditor } from '../../components/email/RichTextEditor';
 export const ReviewEditPage: React.FC = () => {
   const navigate = useNavigate();
   const {
-    generatedDraft,
-    setGeneratedDraft,
-    addTemplate,
-    completeScheduleOrSend,
-    setScheduleConfig,
-    showToast,
-  } = useEmailContext();
+  generatedDraft,
+  setGeneratedDraft,
+  addTemplate,
+  completeScheduleOrSend,
+  setScheduleConfig,
+  showToast,
+  updateDraft,
+} = useEmailContext();
 
-  const [to, setTo] = useState(generatedDraft.to);
-  const [subject, setSubject] = useState(generatedDraft.subject);
-  const [body, setBody] = useState(generatedDraft.body);
+const location = useLocation();
+
+const draftId = location.state?.draftId as
+  | string
+  | undefined;
+
+const draftFromNavigation =
+  location.state?.draft as {
+    to: string;
+    subject: string;
+    body: string;
+  } | undefined;
+
+  const [to, setTo] = useState(draftFromNavigation?.to ?? generatedDraft.to);
+  const [subject, setSubject] = useState(draftFromNavigation?.subject ?? generatedDraft.subject);
+  const [body, setBody] = useState(draftFromNavigation?.body ?? generatedDraft.body);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+const handleSaveDraft = async () => {
+  if (!to.trim()) {
+    alert('Please enter a recipient.');
+    return;
+  }
+
+  if (!subject.trim()) {
+    alert('Please enter a subject.');
+    return;
+  }
+
+  if (!body.trim()) {
+    alert('Please enter the email body.');
+    return;
+  }
+
+  setIsSavingDraft(true);
+
+  try {
+    if (draftId) {
+      // Existing Firestore draft
+      await updateDraft(draftId, {
+        to,
+        subject,
+        body,
+      });
+    } else {
+      // New draft
+      const result = await createEmail({
+        to,
+        subject,
+        body,
+        scheduled_at: null,
+      });
+
+      console.log(
+        'New draft created:',
+        result
+      );
+    }
+
+    setGeneratedDraft({
+      to,
+      subject,
+      body,
+    });
+
+    navigate('/drafts');
+
+  } catch (error) {
+    console.error(
+      'Failed to save draft:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to save draft'
+    );
+  } finally {
+    setIsSavingDraft(false);
+  }
+};
 
   const handleSaveAsTemplate = () => {
     addTemplate({
@@ -125,6 +210,26 @@ export const ReviewEditPage: React.FC = () => {
             >
               <Bookmark className="w-3.5 h-3.5" />
               <span>Save as Template</span>
+            </button>
+
+            <button
+              onClick={handleSaveDraft}
+              disabled={isSavingDraft}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-[#E8EBF8] hover:border-purple-300 hover:bg-purple-50/50 text-xs font-semibold text-[#635BFF] transition-colors disabled:opacity-50"
+            >
+              {isSavingDraft ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-[#635BFF] border-t-transparent rounded-full animate-spin" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>
+                    {draftId ? 'Update Draft' : 'Save Draft'}
+                  </span>
+                </>
+              )}
             </button>
           </div>
 

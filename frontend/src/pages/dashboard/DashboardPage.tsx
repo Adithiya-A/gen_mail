@@ -14,6 +14,12 @@ import {
 } from 'lucide-react';
 import { useEmailContext } from '../../context/EmailContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
+import {
+  createEmail,
+  getEmails,
+  updateEmail,
+  deleteEmail,
+} from '../../services/emailService';
 
 export const DashboardPage: React.FC = () => {
   const { user, stats, scheduledEmails, sentEmails, activities } = useEmailContext();
@@ -27,6 +33,135 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
+
+     <button
+              onClick={async () => {
+                try {
+                  const result = await createEmail({
+                    to: 'test@example.com',
+                    subject: 'GenMail Backend Test',
+                    body: 'This email was created through the GenMail backend.',
+                  });
+
+                  console.log('Email created:', result);
+
+                  alert('Email saved successfully!');
+                } catch (error) {
+                  console.error('Email creation failed:', error);
+
+                  alert(
+                    error instanceof Error
+                      ? error.message
+                      : 'Something went wrong'
+                  );
+                }
+              }}
+            >
+              Test Create Email
+      </button>
+      <button
+          onClick={async () => {
+            try {
+              const result = await getEmails();
+
+              console.log('Emails from backend:', result);
+
+              alert(
+                `Found ${result.emails.length} email(s)`
+              );
+            } catch (error) {
+              console.error('Failed to fetch emails:', error);
+
+              alert(
+                error instanceof Error
+                  ? error.message
+                  : 'Something went wrong'
+              );
+            }
+          }}
+        >
+          Test Get Emails
+    </button>
+    <button
+      onClick={async () => {
+        try {
+          const result = await getEmails();
+
+          if (result.emails.length === 0) {
+            alert('No emails available to update');
+            return;
+          }
+
+          const emailId = result.emails[0].id;
+
+          const updated = await updateEmail(
+            emailId,
+            {
+              subject: 'Updated GenMail Subject',
+            }
+          );
+
+          console.log(
+            'Updated email:',
+            updated
+          );
+
+          alert('Email updated successfully!');
+        } catch (error) {
+          console.error(
+            'Update failed:',
+            error
+          );
+
+          alert(
+            error instanceof Error
+              ? error.message
+              : 'Something went wrong'
+          );
+        }
+      }}
+    >
+      Test Update Email
+    </button>
+      <button
+        onClick={async () => {
+          try {
+            const result = await getEmails();
+
+            if (result.emails.length === 0) {
+              alert('No emails available to delete');
+              return;
+            }
+
+            const emailId = result.emails[0].id;
+
+            const deleted = await deleteEmail(
+              emailId
+            );
+
+            console.log(
+              'Deleted email:',
+              deleted
+            );
+
+            alert('Email deleted successfully!');
+          } catch (error) {
+            console.error(
+              'Delete failed:',
+              error
+            );
+
+            alert(
+              error instanceof Error
+                ? error.message
+                : 'Something went wrong'
+            );
+          }
+        }}
+      >
+        Test Delete Email
+      </button>
+
       {/* 1. Greeting & Daily Inspiration Quote */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

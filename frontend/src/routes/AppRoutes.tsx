@@ -32,6 +32,7 @@ import { EmailTrackingPage } from '../pages/management/EmailTrackingPage';
 import { TemplatesPage } from '../pages/management/TemplatesPage';
 import { CreateEditTemplatePage } from '../pages/management/CreateEditTemplatePage';
 import { EmailDetailsPage } from '../pages/management/EmailDetailsPage';
+import { DraftsPage } from '../pages/management/DraftsPage';
 
 // Settings & Help
 import { SettingsPage } from '../pages/settings/SettingsPage';
@@ -75,6 +76,7 @@ export const AppRoutes: React.FC = () => {
         <Route path="/templates/new" element={<CreateEditTemplatePage />} />
         <Route path="/templates/:id/edit" element={<CreateEditTemplatePage />} />
         <Route path="/emails/:id" element={<EmailDetailsPage />} />
+        <Route path="/drafts" element={<DraftsPage />} />
 
         {/* Settings & Help */}
         <Route path="/settings" element={<SettingsPage />} />

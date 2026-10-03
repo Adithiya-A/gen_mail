@@ -1,5 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
+  createEmail,
+  getEmails,
+  updateEmail,
+  deleteEmail,
+} from '../services/emailService';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../config/firebase';
+import {
   UserProfile,
   EmailItem,
   IntentData,
@@ -70,6 +78,17 @@ interface EmailContextType {
   addScheduledEmail: (email: Omit<EmailItem, 'id'>) => void;
   deleteScheduledEmail: (id: string) => void;
 
+  draftEmails: EmailItem[];
+  updateDraft: (
+    id: string,
+    email: {
+      to: string;
+      subject: string;
+      body: string;
+    }
+  ) => Promise<void>;
+  deleteDraft: (id: string) => Promise<void>;
+
   sentEmails: EmailItem[];
   addSentEmail: (email: Omit<EmailItem, 'id'>) => void;
 
@@ -96,11 +115,20 @@ interface EmailContextType {
   toasts: ToastNotification[];
   showToast: (title: string, message: string, type?: 'success' | 'info' | 'error') => void;
   removeToast: (id: string) => void;
+
+  saveDraft: (
+  email: {
+    to: string;
+    subject: string;
+    body: string;
+  }
+) => Promise<string>;
 }
 
 const EmailContext = createContext<EmailContextType | undefined>(undefined);
 
 export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+
   const [user, setUser] = useState<UserProfile>(initialUser);
   const [stats, setStats] = useState(initialStats);
   const [isGmailConnected, setIsGmailConnected] = useState<boolean>(true);
@@ -148,6 +176,7 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isSyncing, setIsSyncing] = useState(false);
 
   const [scheduledEmails, setScheduledEmails] = useState<EmailItem[]>(initialScheduledEmails);
+  const [draftEmails, setDraftEmails] = useState<EmailItem[]>([]);
   const [sentEmails, setSentEmails] = useState<EmailItem[]>(initialSentEmails);
   const [trackingEmails, setTrackingEmails] = useState<EmailItem[]>(initialTrackingEmails);
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
@@ -155,6 +184,112 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
+
+  const convertBackendEmail = (email: any): EmailItem => {
+    const createdAt = email.created_at
+      ? new Date(email.created_at)
+      : new Date();
+
+    return {
+      id: email.id,
+      sender: user.name,
+      senderEmail: user.email,
+
+      recipient: email.to,
+
+      subject: email.subject,
+
+      snippet:
+        email.body?.slice(0, 80) +
+          (email.body?.length > 80 ? '...' : '') || '',
+
+      body: email.body,
+
+      time: createdAt.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+
+      date: createdAt.toLocaleDateString('en-US', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }),
+
+      fullDate: createdAt.toISOString(),
+
+      status:
+        email.status?.toLowerCase() === 'scheduled'
+          ? 'scheduled'
+          : email.status?.toLowerCase() === 'sent'
+            ? 'sent'
+            : 'draft',
+
+      iconType: 'mail',
+
+      scheduledTime: email.scheduled_at
+        ? new Date(email.scheduled_at).toLocaleString()
+        : undefined,
+
+      sentTime: email.sent_at
+        ? new Date(email.sent_at).toLocaleString()
+        : undefined,
+    };
+  };
+
+  const loadEmailsFromBackend = async () => {
+    try {
+      const result = await getEmails();
+
+      const backendEmails = result.emails || [];
+
+      const convertedEmails =
+        backendEmails.map(convertBackendEmail);
+
+      const drafts = convertedEmails.filter(
+        (email) => email.status === 'draft'
+      );
+
+      const scheduled = convertedEmails.filter(
+        (email) => email.status === 'scheduled'
+      );
+
+      const sent = convertedEmails.filter(
+        (email) => email.status === 'sent'
+      );
+
+      setDraftEmails(drafts);
+      setScheduledEmails(scheduled);
+      setSentEmails(sent);
+
+      setStats((prev) => ({
+        ...prev,
+        drafts: drafts.length,
+        scheduled: scheduled.length,
+        emailsSent: sent.length,
+      }));
+    } catch (error) {
+      console.error(
+        'Failed to load emails from backend:',
+        error
+      );
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      async (firebaseUser) => {
+        if (!firebaseUser) {
+          return;
+        }
+
+        await loadEmailsFromBackend();
+      }
+    );
+
+    return unsubscribe;
+  }, []);
 
   const showToast = (title: string, message: string, type: 'success' | 'info' | 'error' = 'success') => {
     const id = Date.now().toString();
@@ -247,6 +382,60 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
 
     setIsGeneratingAI(false);
+  };
+
+  const saveDraft = async (email: {
+    to: string;
+    subject: string;
+    body: string;
+  }) => {
+    const result = await createEmail({
+      to: email.to,
+      subject: email.subject,
+      body: email.body,
+      scheduled_at: null,
+    });
+
+    showToast(
+      'Draft Saved',
+      'Your email draft has been saved successfully.'
+    );
+
+    return result.email.id;
+  };
+
+    const updateDraft = async (
+    id: string,
+    email: {
+      to: string;
+      subject: string;
+      body: string;
+    }
+  ) => {
+    await updateEmail(id, {
+      to: email.to,
+      subject: email.subject,
+      body: email.body,
+    });
+
+    await loadEmailsFromBackend();
+
+    showToast(
+      'Draft Updated',
+      'Your draft has been updated successfully.'
+    );
+  };
+
+  const deleteDraft = async (id: string) => {
+    await deleteEmail(id);
+
+    await loadEmailsFromBackend();
+
+    showToast(
+      'Draft Deleted',
+      'The draft has been deleted.',
+      'info'
+    );
   };
 
   const completeScheduleOrSend = async (overrideConfig?: Partial<ScheduleConfig>): Promise<string> => {
@@ -413,6 +602,9 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         scheduledEmails,
         addScheduledEmail,
         deleteScheduledEmail,
+        draftEmails,
+        updateDraft,
+        deleteDraft,
         sentEmails,
         addSentEmail,
         trackingEmails,
@@ -428,6 +620,7 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         generateEmailFromPrompt,
         isGeneratingAI,
         completeScheduleOrSend,
+        saveDraft,
         toasts,
         showToast,
         removeToast,
