@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+}
+
+@layer utilities {
+  .bg-gradient-brand {
+    background: linear-gradient(135deg, #635BFF 0%, #7C3AED 100%);
+  }
+
+  .bg-gradient-subtle {
+    background: linear-gradient(135deg, #F8F9FE 0%, #EDE9FE 50%, #F5F3FF 100%);
+  }
+
+  .text-gradient-purple {
+    background: linear-gradient(135deg, #635BFF 0%, #7C3AED 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.9);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(232, 235, 248, 0.8);
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Rich Text Editor WYSIWYG overrides for Tailwind resets */
+.rich-text-content ul {
+  list-style-type: disc !important;
+  padding-left: 1.75rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rich-text-content ol {
+  list-style-type: decimal !important;
+  padding-left: 1.75rem !important;
+  margin-top: 0.5rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+.rich-text-content li {
+  display: list-item !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+  line-height: 1.6 !important;
+}
+
+.rich-text-content p {
+  margin-bottom: 0.75rem !important;
+  line-height: 1.625 !important;
+}
+
+.rich-text-content u {
+  text-decoration: underline !important;
+}
+
+.rich-text-content b,
+.rich-text-content strong {
+  font-weight: 700 !important;
+}
+
+.rich-text-content i,
+.rich-text-content em {
+  font-style: italic !important;
+}
+
+.rich-text-content a {
+  color: #635BFF !important;
+  text-decoration: underline !important;
+  font-weight: 500 !important;
+}
