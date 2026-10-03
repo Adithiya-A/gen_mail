@@ -7,6 +7,7 @@ from app.services.email_service import (
     get_emails,
     update_email,
     delete_email,
+    send_email
 )
 
 
@@ -92,4 +93,33 @@ def delete_existing_email(
 
     return {
         "message": "Email deleted successfully",
+    }
+
+@router.post("/{email_id}/send")
+def send_existing_email(
+    email_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    user_id = current_user["uid"]
+
+    sent_message, error = send_email(
+        user_id=user_id,
+        email_id=email_id,
+    )
+
+    if error:
+        if error == "Email not found":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=error,
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error,
+        )
+
+    return {
+        "message": "Email sent successfully",
+        "gmail_message_id": sent_message.get("id"),
     }

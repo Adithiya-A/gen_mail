@@ -152,3 +152,34 @@ export const deleteEmail = async (
 
   return response.json();
 };
+
+export const sendEmail = async (emailId: string) => {
+  const user = auth.currentUser;
+
+  if (!user) {
+    throw new Error('User is not authenticated');
+  }
+
+  const token = await user.getIdToken();
+
+  const response = await fetch(
+    `${API_URL}/emails/${emailId}/send`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorData = await response.json();
+
+    throw new Error(
+      errorData.detail || 'Failed to send email'
+    );
+  }
+
+  return response.json();
+};

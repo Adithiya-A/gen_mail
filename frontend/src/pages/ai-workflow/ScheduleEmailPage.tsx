@@ -51,6 +51,58 @@ export const ScheduleEmailPage: React.FC = () => {
   const formattedDate = formatDate(selectedDate);
   const formattedTime = `${selectedHour}:${selectedMinute} ${selectedPeriod}`;
 
+  const getScheduledAtISO = () => {
+    let hour = parseInt(selectedHour, 10);
+
+    if (selectedPeriod === 'PM' && hour !== 12) {
+      hour += 12;
+    }
+
+    if (selectedPeriod === 'AM' && hour === 12) {
+      hour = 0;
+    }
+
+    const year = selectedDate.getFullYear();
+    const month = selectedDate.getMonth();
+    const day = selectedDate.getDate();
+    const minute = parseInt(selectedMinute, 10);
+
+    /*
+    * The timezone dropdown currently uses fixed GMT offsets.
+    * Example:
+    * (GMT+5:30) Chennai...
+    * (GMT-5:00) Eastern Time...
+    */
+    const offsetMatch = timeZone.match(/GMT([+-])(\d+):(\d+)/);
+
+    if (!offsetMatch) {
+      throw new Error('Invalid timezone format');
+    }
+
+    const sign = offsetMatch[1] === '+' ? 1 : -1;
+    const offsetHours = parseInt(offsetMatch[2], 10);
+    const offsetMinutes = parseInt(offsetMatch[3], 10);
+
+    const totalOffsetMinutes =
+      sign * (offsetHours * 60 + offsetMinutes);
+
+    /*
+    * Build the selected date/time as UTC first,
+    * then subtract the selected timezone offset.
+    */
+    const utcTimestamp =
+      Date.UTC(
+        year,
+        month,
+        day,
+        hour,
+        minute
+      ) -
+      totalOffsetMinutes * 60 * 1000;
+
+    return new Date(utcTimestamp).toISOString();
+  };
+
   // Month navigation
   const currentYear = viewDate.getFullYear();
   const currentMonth = viewDate.getMonth();
@@ -140,6 +192,10 @@ export const ScheduleEmailPage: React.FC = () => {
       date: formattedDate,
       time: formattedTime,
       timeZone,
+      scheduledAt:
+        sendType === 'later'
+          ? getScheduledAtISO()
+          : undefined,
       sendReminder,
     };
 

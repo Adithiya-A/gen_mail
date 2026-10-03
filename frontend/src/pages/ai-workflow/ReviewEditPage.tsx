@@ -4,7 +4,7 @@ import {
   Link,
   useLocation,
 } from 'react-router-dom';
-import { createEmail, updateEmail } from '../../services/emailService';
+import {createEmail, } from '../../services/emailService';
 import {
   Send,
   User,
@@ -19,20 +19,16 @@ import { RichTextEditor } from '../../components/email/RichTextEditor';
 export const ReviewEditPage: React.FC = () => {
   const navigate = useNavigate();
   const {
-  generatedDraft,
-  setGeneratedDraft,
-  addTemplate,
-  completeScheduleOrSend,
-  setScheduleConfig,
-  showToast,
-  updateDraft,
-} = useEmailContext();
+    generatedDraft,
+    setGeneratedDraft,
+    addTemplate,
+    updateDraft,
+    setCurrentEmailId,
+  } = useEmailContext();
 
 const location = useLocation();
 
-const draftId = location.state?.draftId as
-  | string
-  | undefined;
+const draftId = location.state?.draftId as | string | undefined;
 
 const draftFromNavigation =
   location.state?.draft as {
@@ -122,15 +118,16 @@ const handleSaveDraft = async () => {
     });
   };
 
-  const handleInstantSend = async () => {
-    setGeneratedDraft({ to, subject, body });
-    setScheduleConfig((prev) => ({ ...prev, sendType: 'now' }));
-    await completeScheduleOrSend();
-    navigate('/sent');
-  };
 
   const handleContinue = () => {
-    setGeneratedDraft({ to, subject, body });
+    setGeneratedDraft({
+      to,
+      subject,
+      body,
+    });
+
+    setCurrentEmailId(draftId ?? null);
+
     navigate('/schedule');
   };
 
@@ -188,8 +185,7 @@ const handleSaveDraft = async () => {
         <RichTextEditor
           value={body}
           onChange={setBody}
-          showSendButton={true}
-          onSend={handleInstantSend}
+          showSendButton={false}
           maxChars={2000}
         />
 

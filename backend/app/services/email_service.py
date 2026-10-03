@@ -3,6 +3,10 @@ from uuid import uuid4
 
 from firebase_admin import firestore
 
+import base64
+from email.message import EmailMessage
+from app.core.gmail import get_gmail_service
+
 
 db = firestore.client()
 
@@ -133,3 +137,107 @@ def delete_email(
     email_ref.delete()
 
     return True
+
+def send_email(user_id: str, email_id: str):
+    # Get the email from Firestore
+    email_ref = (
+        db.collection("users")
+        .document(user_id)
+        .collection("emails")
+        .document(email_id)
+    )
+
+    email_doc = email_ref.get()
+
+    if not email_doc.exists:
+        return None, "Email not found"
+
+    email_data = email_doc.to_dict()
+
+    # Prevent sending an already-sent email
+    if email_data.get("status") in ("SENDING", "SENT"):
+        return None, "Email is already being sent or has already been sent"
+
+    # Get Gmail OAuth credentials
+    gmail_ref = (
+        db.collection("users")
+        .document(user_id)
+        .collection("gmail")
+        .document("connection")
+    )
+
+    gmail_doc = gmail_ref.get()
+
+    if not gmail_doc.exists:
+        return None, "Gmail is not connected"
+
+    gmail_data = gmail_doc.to_dict()
+
+    if not gmail_data.get("connected"):
+        return None, "Gmail is not connected"
+
+    # Mark email as SENDING
+    email_ref.update({
+        "status": "SENDING",
+        "updated_at": datetime.now(timezone.utc),
+    })
+
+    try:
+        # Create Gmail API service
+        gmail_service = get_gmail_service(gmail_data)
+
+        # Create email message
+        message = EmailMessage()
+
+        message["To"] = email_data["to"]
+        message["Subject"] = email_data["subject"]
+
+        if email_data.get("cc"):
+            message["Cc"] = email_data["cc"]
+
+        if email_data.get("bcc"):
+            message["Bcc"] = email_data["bcc"]
+
+        message.set_content(email_data["body"])
+
+        # Encode email for Gmail API
+        encoded_message = base64.urlsafe_b64encode(
+            message.as_bytes()
+        ).decode()
+
+        gmail_message = {
+            "raw": encoded_message
+        }
+
+        # Send through Gmail API
+        sent_message = (
+            gmail_service.users()
+            .messages()
+            .send(
+                userId="me",
+                body=gmail_message,
+            )
+            .execute()
+        )
+
+        # Mark email as SENT
+        now = datetime.now(timezone.utc)
+
+        email_ref.update({
+            "status": "SENT",
+            "sent_at": now,
+            "updated_at": now,
+        })
+
+        return sent_message, None
+
+    except Exception as e:
+        print("Gmail send error:", repr(e))
+
+        # Mark email as FAILED
+        email_ref.update({
+            "status": "FAILED",
+            "updated_at": datetime.now(timezone.utc),
+        })
+
+        return None, "Failed to send email"

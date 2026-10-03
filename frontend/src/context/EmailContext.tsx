@@ -4,6 +4,7 @@ import {
   getEmails,
   updateEmail,
   deleteEmail,
+  sendEmail,
 } from '../services/emailService';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebase';
@@ -43,6 +44,7 @@ export interface ScheduleConfig {
   date: string;
   time: string;
   timeZone: string;
+  scheduledAt?: string;
   sendReminder: boolean;
 }
 
@@ -76,7 +78,7 @@ interface EmailContextType {
 
   scheduledEmails: EmailItem[];
   addScheduledEmail: (email: Omit<EmailItem, 'id'>) => void;
-  deleteScheduledEmail: (id: string) => void;
+  deleteScheduledEmail: (id: string) => Promise<void>;
 
   draftEmails: EmailItem[];
   updateDraft: (
@@ -109,6 +111,8 @@ interface EmailContextType {
   // AI Pipeline Actions
   generateEmailFromPrompt: (customPrompt?: string) => Promise<void>;
   isGeneratingAI: boolean;
+  currentEmailId: string | null;
+  setCurrentEmailId: (id: string | null) => void;
   completeScheduleOrSend: (overrideConfig?: Partial<ScheduleConfig>) => Promise<string>;
 
   // Toasts
@@ -155,6 +159,8 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     subject: 'Request for Leave Tomorrow',
     body: `Dear Sir/Madam,\n\nI hope you are doing well. I am writing to request permission for leave tomorrow due to health issues. I am currently not feeling well and need to take rest for a speedy recovery.\n\nI will make sure to complete any pending work and stay updated with the class materials.\n\nThank you for your understanding.\n\nYours sincerely,\nAarthi`,
   });
+
+  const [currentEmailId, setCurrentEmailId] = useState<string | null>(null);
 
   const todayFormatted = new Date().toLocaleDateString('en-US', {
     day: 'numeric',
@@ -438,55 +444,97 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  const completeScheduleOrSend = async (overrideConfig?: Partial<ScheduleConfig>): Promise<string> => {
-    const effective = { ...scheduleConfig, ...(overrideConfig || {}) };
+const completeScheduleOrSend = async (
+    overrideConfig?: Partial<ScheduleConfig>
+  ): Promise<string> => {
+    const effective = {
+      ...scheduleConfig,
+      ...(overrideConfig || {}),
+    };
+
     const isNow = effective.sendType === 'now';
-    const newId = `email-${Date.now()}`;
 
-    if (isNow) {
-      const newSent: EmailItem = {
-        id: newId,
-        sender: user.name,
-        senderEmail: user.email,
-        recipient: generatedDraft.to,
+    try {
+      let emailId = currentEmailId;
+
+      /*
+      * STEP 1:
+      * If this is an existing draft, update it with
+      * the latest changes from Review & Edit.
+      */
+      if (emailId) {
+        await updateEmail(emailId, {
+          to: generatedDraft.to,
+          subject: generatedDraft.subject,
+          body: generatedDraft.body,
+        });
+      }
+
+      /*
+      * STEP 2:
+      * If this is a newly generated email and it has not
+      * been saved as a draft, create it in Firestore.
+      */
+      if (!emailId) {
+        const result = await createEmail({
+          to: generatedDraft.to,
+          subject: generatedDraft.subject,
+          body: generatedDraft.body,
+          scheduled_at: null,
+        });
+
+        emailId = result.email.id;
+
+        setCurrentEmailId(emailId);
+      }
+
+      /*
+      * STEP 3:
+      * SEND NOW
+      */
+      if (isNow) {
+        await sendEmail(emailId);
+
+        /*
+        * Reload emails from Firestore so the UI reflects
+        * the real SENT status.
+        */
+        await loadEmailsFromBackend();
+
+        addActivity({
+          type: 'sent',
+          title: 'Email sent',
+          description: `${generatedDraft.subject} to ${generatedDraft.to}`,
+          timestamp: 'Just now',
+          iconBg: 'bg-emerald-100 text-emerald-600',
+        });
+
+        showToast(
+          'Email Sent Successfully!',
+          `Delivered to ${generatedDraft.to} via Gmail.`
+        );
+
+        return emailId;
+      }
+
+      /*
+      * SCHEDULE FOR LATER
+      */
+      if (!effective.scheduledAt) {
+        throw new Error(
+          'Scheduled date and time are required.'
+        );
+      }
+
+      await updateEmail(emailId, {
+        to: generatedDraft.to,
         subject: generatedDraft.subject,
-        snippet: generatedDraft.body.slice(0, 60) + '...',
         body: generatedDraft.body,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        date: 'Today',
-        sentTime: `${new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}, ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-        status: 'sent',
-        iconType: 'mail',
-      };
-      setSentEmails((prev) => [newSent, ...prev]);
-      setStats((prev) => ({ ...prev, emailsSent: prev.emailsSent + 1 }));
-
-      addActivity({
-        type: 'sent',
-        title: 'Email sent',
-        description: `${generatedDraft.subject} to ${generatedDraft.to}`,
-        timestamp: 'Just now',
-        iconBg: 'bg-emerald-100 text-emerald-600',
+        scheduled_at: effective.scheduledAt,
+        status: 'SCHEDULED',
       });
-      showToast('Email Sent Successfully!', `Delivered to ${generatedDraft.to} via Gmail.`);
-    } else {
-      const newScheduled: EmailItem = {
-        id: newId,
-        sender: user.name,
-        senderEmail: user.email,
-        recipient: generatedDraft.to,
-        subject: generatedDraft.subject,
-        snippet: generatedDraft.body.slice(0, 60) + '...',
-        body: generatedDraft.body,
-        time: effective.time,
-        date: effective.date,
-        scheduledTime: `${effective.date}, ${effective.time}`,
-        status: 'scheduled',
-        iconType: 'team',
-        type: 'Scheduled Email',
-      };
-      setScheduledEmails((prev) => [newScheduled, ...prev]);
-      setStats((prev) => ({ ...prev, scheduled: prev.scheduled + 1 }));
+
+      await loadEmailsFromBackend();
 
       addActivity({
         type: 'scheduled',
@@ -495,10 +543,30 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         timestamp: 'Just now',
         iconBg: 'bg-purple-100 text-purple-600',
       });
-      showToast('Email Scheduled!', `Queued for ${effective.date} at ${effective.time}`);
-    }
 
-    return newId;
+      showToast(
+        'Email Scheduled!',
+        `Queued for ${effective.date} at ${effective.time}`
+      );
+
+      return emailId;
+
+    } catch (error) {
+      console.error(
+        'Failed to complete email action:',
+        error
+      );
+
+      showToast(
+        'Email Action Failed',
+        error instanceof Error
+          ? error.message
+          : 'Failed to process email.',
+        'error'
+      );
+
+      throw error;
+    }
   };
 
   const toggleStarInbox = (id: string) => {
@@ -538,9 +606,31 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setScheduledEmails((prev) => [item, ...prev]);
   };
 
-  const deleteScheduledEmail = (id: string) => {
-    setScheduledEmails((prev) => prev.filter((e) => e.id !== id));
-    showToast('Scheduled Email Cancelled', 'The email was removed from queue.', 'info');
+  const deleteScheduledEmail = async (id: string) => {
+    try {
+      await deleteEmail(id);
+
+      await loadEmailsFromBackend();
+
+      showToast(
+        'Scheduled Email Cancelled',
+        'The email was removed from the schedule.',
+        'info'
+      );
+    } catch (error) {
+      console.error(
+        'Failed to cancel scheduled email:',
+        error
+      );
+
+      showToast(
+        'Cancellation Failed',
+        error instanceof Error
+          ? error.message
+          : 'Failed to cancel scheduled email.',
+        'error'
+      );
+    }
   };
 
   const addSentEmail = (email: Omit<EmailItem, 'id'>) => {
@@ -619,6 +709,8 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         disconnectGmail,
         generateEmailFromPrompt,
         isGeneratingAI,
+        currentEmailId,
+        setCurrentEmailId,
         completeScheduleOrSend,
         saveDraft,
         toasts,
