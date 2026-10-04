@@ -33,6 +33,7 @@ export interface EmailItem {
     type: 'pdf' | 'doc' | 'image';
   };
   scheduledTime?: string;
+  scheduledAt?: string;
   sentTime?: string;
   lastActivity?: string;
   type?: string;

@@ -237,6 +237,10 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ? new Date(email.scheduled_at).toLocaleString()
         : undefined,
 
+      scheduledAt: email.scheduled_at
+        ? new Date(email.scheduled_at).toISOString()
+        : undefined,
+
       sentTime: email.sent_at
         ? new Date(email.sent_at).toLocaleString()
         : undefined,
@@ -500,6 +504,7 @@ const completeScheduleOrSend = async (
         * the real SENT status.
         */
         await loadEmailsFromBackend();
+        setCurrentEmailId(null);
 
         addActivity({
           type: 'sent',
@@ -535,6 +540,8 @@ const completeScheduleOrSend = async (
       });
 
       await loadEmailsFromBackend();
+
+      setCurrentEmailId(null);
 
       addActivity({
         type: 'scheduled',

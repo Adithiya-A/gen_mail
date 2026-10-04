@@ -37,10 +37,12 @@ const draftFromNavigation =
     body: string;
   } | undefined;
 
-  const [to, setTo] = useState(draftFromNavigation?.to ?? generatedDraft.to);
-  const [subject, setSubject] = useState(draftFromNavigation?.subject ?? generatedDraft.subject);
-  const [body, setBody] = useState(draftFromNavigation?.body ?? generatedDraft.body);
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
+const scheduledAt = location.state?.scheduledAt;
+
+const [to, setTo] = useState(draftFromNavigation?.to ?? generatedDraft.to);
+const [subject, setSubject] = useState(draftFromNavigation?.subject ?? generatedDraft.subject);
+const [body, setBody] = useState(draftFromNavigation?.body ?? generatedDraft.body);
+const [isSavingDraft, setIsSavingDraft] = useState(false);
 
 const handleSaveDraft = async () => {
   if (!to.trim()) {
@@ -128,7 +130,11 @@ const handleSaveDraft = async () => {
 
     setCurrentEmailId(draftId ?? null);
 
-    navigate('/schedule');
+    navigate('/schedule', {
+      state: {
+        scheduledAt,
+      },
+    });
   };
 
   return (

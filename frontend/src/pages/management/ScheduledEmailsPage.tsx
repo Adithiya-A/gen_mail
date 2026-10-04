@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Calendar,
@@ -12,6 +13,8 @@ import {
   GraduationCap,
   Star,
   Trash2,
+  Edit2,
+  Eye,
 } from 'lucide-react';
 import { useEmailContext } from '../../context/EmailContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
@@ -24,6 +27,13 @@ export const ScheduledEmailsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+  }>({
+    top: 0,
+    left: 0,
+  });
 
   const filtered = scheduledEmails.filter((item) => {
     const matchesSearch =
@@ -218,45 +228,195 @@ export const ScheduledEmailsPage: React.FC = () => {
                     <td className="py-4" onClick={() => navigate(`/emails/${item.id}`)}>
                       <StatusBadge status="scheduled" size="sm" />
                     </td>
-                    <td className="py-4 text-right relative" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        onClick={() =>
-                          setActiveMenuId(activeMenuId === item.id ? null : item.id)
-                        }
-                        className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                      >
-                        <MoreVertical className="w-4 h-4" />
-                      </button>
+                    <td
+                      className="py-4 text-right"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="relative inline-block">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
 
-                      {activeMenuId === item.id && (
-                        <div className="absolute right-0 mt-1 w-36 bg-white rounded-2xl shadow-soft-lg border border-[#E8EBF8] p-1 z-30 flex flex-col gap-0.5 text-left animate-in fade-in zoom-in-95 duration-100">
-                          <button
-                            onClick={() => {
-                              navigate(`/emails/${item.id}`);
+                            if (activeMenuId === item.id) {
                               setActiveMenuId(null);
-                            }}
-                            className="px-3 py-1.5 text-xs text-[#505A74] hover:bg-purple-50 hover:text-[#635BFF] rounded-xl"
-                          >
-                            View Details
-                          </button>
-                          <button
-                            onClick={() => {
-                              deleteScheduledEmail(item.id);
-                              setActiveMenuId(null);
-                            }}
-                            className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-1.5"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            <span>Cancel Send</span>
-                          </button>
-                        </div>
-                      )}
+                              return;
+                            }
+
+                            const rect = e.currentTarget.getBoundingClientRect();
+
+                            const menuWidth = 160;
+                            const menuHeight = 130;
+                            const spacing = 6;
+
+                            let left = rect.right - menuWidth;
+                            let top = rect.bottom + spacing;
+
+                            // Keep menu inside the viewport horizontally
+                            if (left < 8) {
+                              left = 8;
+                            }
+
+                            if (left + menuWidth > window.innerWidth - 8) {
+                              left = window.innerWidth - menuWidth - 8;
+                            }
+
+                            // If there isn't enough space below,
+                            // open it upward.
+                            if (top + menuHeight > window.innerHeight - 8) {
+                              top = rect.top - menuHeight - spacing;
+                            }
+
+                            // Prevent it from going above the viewport
+                            if (top < 8) {
+                              top = 8;
+                            }
+
+                            setMenuPosition({
+                              top,
+                              left,
+                            });
+
+                            setActiveMenuId(item.id);
+                          }}
+                          className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+
+                        {activeMenuId === item.id && (
+                          <div className="absolute right-0 top-full mb-3 w-40 bg-white rounded-2xl shadow-soft-lg border border-[#E8EBF8] p-1 z-50 flex flex-col gap-0.5 text-left animate-in fade-in zoom-in-95 duration-100">
+
+                            {/* Edit */}
+                            <button
+                              onClick={() => {
+                                navigate('/review', {
+                                  state: {
+                                    draftId: item.id,
+                                    scheduledAt: item.scheduledAt,
+                                    draft: {
+                                      to: item.recipient,
+                                      subject: item.subject,
+                                      body: item.body,
+                                    },
+                                  },
+                                });
+
+                                setActiveMenuId(null);
+                              }}
+                              className="px-3 py-1.5 text-xs text-[#505A74] hover:bg-purple-50 hover:text-[#635BFF] rounded-xl flex items-center gap-1.5"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+
+                            {/* View Details */}
+                            <button
+                              onClick={() => {
+                                navigate(`/emails/${item.id}`);
+                                setActiveMenuId(null);
+                              }}
+                              className="px-3 py-1.5 text-xs text-[#505A74] hover:bg-purple-50 hover:text-[#635BFF] rounded-xl flex items-center gap-1.5"
+                            >
+                              <Eye className="w-3 h-3" />
+                              <span>View Details</span>
+                            </button>
+
+                            {/* Cancel Send */}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await deleteScheduledEmail(item.id);
+                                } finally {
+                                  setActiveMenuId(null);
+                                }
+                              }}
+                              className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-1.5"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>Cancel Send</span>
+                            </button>
+
+                          </div>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          {activeMenuId &&
+            createPortal(
+              (() => {
+                const item = scheduledEmails.find(
+                  (email) => email.id === activeMenuId
+                );
+
+                if (!item) return null;
+
+                return (
+                  <div
+                    className="fixed w-40 bg-white rounded-2xl shadow-soft-lg border border-[#E8EBF8] p-1 z-[9999] flex flex-col gap-0.5 text-left animate-in fade-in zoom-in-95 duration-100"
+                    style={{
+                      top: `${menuPosition.top}px`,
+                      left: `${menuPosition.left}px`,
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Edit */}
+                    <button
+                      onClick={() => {
+                        navigate('/review', {
+                          state: {
+                            draftId: item.id,
+                            scheduledAt: item.scheduledAt,
+                            draft: {
+                              to: item.recipient,
+                              subject: item.subject,
+                              body: item.body,
+                            },
+                          },
+                        });
+
+                        setActiveMenuId(null);
+                      }}
+                      className="px-3 py-1.5 text-xs text-[#505A74] hover:bg-purple-50 hover:text-[#635BFF] rounded-xl flex items-center gap-1.5"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+
+                    {/* View Details */}
+                    <button
+                      onClick={() => {
+                        navigate(`/emails/${item.id}`);
+                        setActiveMenuId(null);
+                      }}
+                      className="px-3 py-1.5 text-xs text-[#505A74] hover:bg-purple-50 hover:text-[#635BFF] rounded-xl flex items-center gap-1.5"
+                    >
+                      <Eye className="w-3 h-3" />
+                      <span>View Details</span>
+                    </button>
+
+                    {/* Cancel Send */}
+                    <button
+                      onClick={async () => {
+                        try {
+                          await deleteScheduledEmail(item.id);
+                        } finally {
+                          setActiveMenuId(null);
+                        }
+                      }}
+                      className="px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Cancel Send</span>
+                    </button>
+                  </div>
+                );
+              })(),
+              document.body
+            )}
         </div>
 
         {/* Footer & Pagination */}

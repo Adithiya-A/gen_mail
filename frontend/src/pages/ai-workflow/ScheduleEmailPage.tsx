@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   Calendar as CalendarIcon,
   Send,
@@ -17,18 +17,56 @@ import confetti from 'canvas-confetti';
 
 export const ScheduleEmailPage: React.FC = () => {
   const navigate = useNavigate();
+
+  const location = useLocation();
+  const existingScheduledAt = location.state?.scheduledAt;
+
+  const getInitialScheduledDate = () => {
+    if (!existingScheduledAt) {
+      return new Date();
+    }
+
+    const date = new Date(existingScheduledAt);
+
+    return Number.isNaN(date.getTime())
+      ? new Date()
+      : date;
+  };
+
   const { scheduleConfig, setScheduleConfig, completeScheduleOrSend } = useEmailContext();
 
   // Real Date tracking
   const today = new Date();
-  const [viewDate, setViewDate] = useState<Date>(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+
+  const initialScheduledDate = getInitialScheduledDate();
+
+  const [viewDate, setViewDate] =
+    useState<Date>(initialScheduledDate);
+
+  const [selectedDate, setSelectedDate] =
+    useState<Date>(initialScheduledDate);
 
   // Time tracking
   const [sendType, setSendType] = useState<'now' | 'later'>(scheduleConfig.sendType || 'later');
-  const [selectedHour, setSelectedHour] = useState('06');
-  const [selectedMinute, setSelectedMinute] = useState('00');
-  const [selectedPeriod, setSelectedPeriod] = useState<'AM' | 'PM'>('PM');
+  const initialHour = initialScheduledDate.getHours();
+  const initialMinute = initialScheduledDate.getMinutes();
+
+  const initialHour12 =
+    initialHour % 12 || 12;
+
+  const initialPeriod: 'AM' | 'PM' =
+    initialHour >= 12 ? 'PM' : 'AM';
+
+  const [selectedHour, setSelectedHour] = useState(
+    initialHour12.toString().padStart(2, '0')
+  );
+
+  const [selectedMinute, setSelectedMinute] = useState(
+    initialMinute.toString().padStart(2, '0')
+  );
+
+  const [selectedPeriod, setSelectedPeriod] =
+    useState<'AM' | 'PM'>(initialPeriod);
   const [timeZone, setTimeZone] = useState(
     scheduleConfig.timeZone || '(GMT+5:30) Chennai, Kolkata, Mumbai, New Delhi'
   );
