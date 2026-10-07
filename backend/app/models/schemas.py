@@ -19,3 +19,36 @@ class EmailUpdate(BaseModel):
     body: str | None = None
     scheduled_at: datetime | None = None
     status: str | None = None
+
+class GenerateEmailRequest(BaseModel):
+    recipient: str
+    instruction: str
+    tone: str = "Professional"
+
+
+class GenerateEmailResponse(BaseModel):
+    subject: str
+    body: str
+
+class ExtractIntentRequest(BaseModel):
+    prompt: str
+    tone: str = "Professional"
+    length: str = "Medium"
+    purpose: str = "Request"
+
+
+class ExtractIntentResponse(BaseModel):
+    recipient: str
+    purpose: str
+    reason: str
+    timing: str
+    tone: str
+    length: str
+
+class GenerateEmailFromIntentRequest(BaseModel):
+    recipient: str
+    purpose: str
+    reason: str
+    timing: str
+    tone: str
+    length: str

@@ -14,6 +14,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { useEmailContext } from '../../context/EmailContext';
+import { extractEmailIntent } from '../../services/emailService';
 
 export const ComposePage: React.FC = () => {
   const navigate = useNavigate();
@@ -71,23 +72,52 @@ export const ComposePage: React.FC = () => {
     setPurpose(item.purpose);
   };
 
-  const handleGenerate = async () => {
-    if (!promptText.trim()) {
-      alert('Please enter an email prompt.');
-      return;
-    }
+const handleGenerate = async () => {
+  if (!promptText.trim()) {
+    alert('Please enter an email prompt.');
+    return;
+  }
 
-    setPromptConfig({
-      promptText,
+  setPromptConfig({
+    promptText,
+    tone,
+    length,
+    purpose,
+    attachmentName: attachment || '',
+  });
+
+  try {
+    const extractedIntent = await extractEmailIntent({
+      prompt: promptText,
       tone,
       length,
       purpose,
-      attachmentName: attachment || '',
     });
 
-    await generateEmailFromPrompt(promptText);
-    navigate('/intent');
-  };
+    console.log(
+      'Gemini extracted intent:',
+      extractedIntent
+    );
+
+    navigate('/intent', {
+      state: {
+        intent: extractedIntent,
+        originalPrompt: promptText,
+      },
+    });
+  } catch (error) {
+    console.error(
+      'Intent extraction failed:',
+      error
+    );
+
+    alert(
+      error instanceof Error
+        ? error.message
+        : 'Failed to understand your email request. Please try again.'
+    );
+  }
+};
 
   const handleAttachSim = () => {
     const input = document.createElement('input');

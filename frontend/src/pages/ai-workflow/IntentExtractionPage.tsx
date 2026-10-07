@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import {
   Sparkles,
   User,
@@ -16,15 +16,66 @@ import { useEmailContext } from '../../context/EmailContext';
 
 export const IntentExtractionPage: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { intentData, updateIntentItem } = useEmailContext();
+
+  const extractedIntent = location.state?.intent;
+
+  useEffect(() => {
+    if (!extractedIntent) {
+      return;
+    }
+
+    updateIntentItem(
+      'recipient',
+      extractedIntent.recipient
+    );
+
+    updateIntentItem(
+      'purpose',
+      extractedIntent.purpose
+    );
+
+    updateIntentItem(
+      'tone',
+      extractedIntent.tone
+    );
+
+    updateIntentItem(
+      'dateTime',
+      extractedIntent.timing
+    );
+
+    updateIntentItem(
+      'keyPoints',
+      [
+        extractedIntent.reason,
+        `Length: ${extractedIntent.length}`,
+      ]
+    );
+  }, [extractedIntent]);
 
   // Inline edit states
   const [editingField, setEditingField] = useState<string | null>(null);
-  const [tempRecipient, setTempRecipient] = useState(intentData.recipient);
-  const [tempPurpose, setTempPurpose] = useState(intentData.purpose);
-  const [tempTone, setTempTone] = useState(intentData.tone);
-  const [tempDateTime, setTempDateTime] = useState(intentData.dateTime);
-  const [tempPoints, setTempPoints] = useState(intentData.keyPoints.join(', '));
+  const [tempRecipient, setTempRecipient] = useState('');
+  const [tempPurpose, setTempPurpose] = useState('');
+  const [tempTone, setTempTone] = useState('');
+  const [tempDateTime, setTempDateTime] = useState('');
+  const [tempPoints, setTempPoints] = useState('');
+
+  useEffect(() => {
+    setTempRecipient(intentData.recipient);
+    setTempPurpose(intentData.purpose);
+    setTempTone(intentData.tone);
+    setTempDateTime(intentData.dateTime);
+    setTempPoints(intentData.keyPoints.join(', '));
+  }, [
+    intentData.recipient,
+    intentData.purpose,
+    intentData.tone,
+    intentData.dateTime,
+    intentData.keyPoints,
+  ]);
 
   const saveEdit = (field: string) => {
     if (field === 'recipient') updateIntentItem('recipient', tempRecipient);
@@ -41,7 +92,22 @@ export const IntentExtractionPage: React.FC = () => {
   };
 
   const handleContinue = () => {
-    navigate('/generate');
+    navigate('/generate', {
+      state: {
+        intent: {
+          recipient: intentData.recipient,
+          purpose: intentData.purpose,
+          reason: intentData.keyPoints[0] || 'Not specified',
+          timing: intentData.dateTime,
+          tone: intentData.tone,
+          length:
+            intentData.keyPoints
+              .find((point) => point.startsWith('Length:'))
+              ?.replace('Length:', '')
+              .trim() || 'Medium',
+        },
+      },
+    });
   };
 
   return (

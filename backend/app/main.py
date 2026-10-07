@@ -5,6 +5,7 @@ from app.auth.dependencies import get_current_user
 from app.services.user_service import create_or_update_user
 from app.routes.emails import router as email_router
 from app.routes.gmail import router as gmail_router
+from app.routes.ai import router as ai_router
 
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -88,3 +89,4 @@ def get_me(current_user: dict = Depends(get_current_user)):
 
 app.include_router(email_router)
 app.include_router(gmail_router)
+app.include_router(ai_router)
