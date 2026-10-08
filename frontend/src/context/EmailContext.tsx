@@ -6,11 +6,20 @@ import {
   deleteEmail,
   sendEmail,
 } from '../services/emailService';
+
 import {
   connectGmail as requestGmailConnection,
   getGmailStatus,
   disconnectGmail as requestGmailDisconnection,
 } from '../services/gmailService';
+
+import {
+  createTemplate,
+  getTemplates,
+  updateTemplate as updateTemplateRequest,
+  deleteTemplate as deleteTemplateRequest,
+} from '../services/templateService';
+
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import {
@@ -102,9 +111,18 @@ interface EmailContextType {
 
   trackingEmails: EmailItem[];
   templates: EmailTemplate[];
-  addTemplate: (tpl: Omit<EmailTemplate, 'id'>) => void;
-  updateTemplate: (id: string, tpl: Partial<EmailTemplate>) => void;
-  deleteTemplate: (id: string) => void;
+  addTemplate: (
+    tpl: Omit<EmailTemplate, 'id'>
+  ) => Promise<void>;
+
+  updateTemplate: (
+    id: string,
+    tpl: Partial<EmailTemplate>
+  ) => Promise<void>;
+
+  deleteTemplate: (
+    id: string
+  ) => Promise<void>;
 
   activities: ActivityItem[];
   addActivity: (act: Omit<ActivityItem, 'id'>) => void;
@@ -292,6 +310,21 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const loadTemplatesFromBackend = async () => {
+    try {
+      const result = await getTemplates();
+
+      const backendTemplates = result.templates || [];
+
+      setTemplates(backendTemplates);
+    } catch (error) {
+      console.error(
+        'Failed to load templates from backend:',
+        error
+      );
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
       auth,
@@ -302,6 +335,7 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         await loadEmailsFromBackend();
+        await loadTemplatesFromBackend();
 
         try {
           const gmailStatus = await getGmailStatus();
@@ -730,27 +764,123 @@ const completeScheduleOrSend = async (
     }
   };
 
-  const addTemplate = (tpl: Omit<EmailTemplate, 'id'>) => {
-    const item: EmailTemplate = { ...tpl, id: `tpl-${Date.now()}` };
-    setTemplates((prev) => [item, ...prev]);
-    addActivity({
-      type: 'template',
-      title: 'Template created',
-      description: `${tpl.name} Template`,
-      timestamp: 'Just now',
-      iconBg: 'bg-rose-100 text-rose-600',
-    });
-    showToast('Template Saved', `"${tpl.name}" is now available in your template library.`);
+  const addTemplate = async (
+    tpl: Omit<EmailTemplate, 'id'>
+  ) => {
+    try {
+      const response = await createTemplate({
+        name: tpl.name,
+        subject: tpl.subject,
+        description: tpl.description,
+        category: tpl.category,
+        body: tpl.body,
+        isDefault: tpl.isDefault,
+        iconBg: tpl.iconBg,
+      });
+
+      const savedTemplate = response.template;
+
+      setTemplates((prev) => [
+        savedTemplate,
+        ...prev,
+      ]);
+
+      addActivity({
+        type: 'template',
+        title: 'Template created',
+        description: `${tpl.name} Template`,
+        timestamp: 'Just now',
+        iconBg: 'bg-rose-100 text-rose-600',
+      });
+
+      showToast(
+        'Template Saved',
+        `"${tpl.name}" is now available in your template library.`
+      );
+    } catch (error) {
+      console.error('Failed to create template:', error);
+
+      showToast(
+        'Template Save Failed',
+        error instanceof Error
+          ? error.message
+          : 'Unable to save template.',
+        'error'
+      );
+    }
   };
 
-  const updateTemplate = (id: string, tpl: Partial<EmailTemplate>) => {
-    setTemplates((prev) => prev.map((item) => (item.id === id ? { ...item, ...tpl } : item)));
-    showToast('Template Updated', 'Template changes have been saved.');
+
+  const updateTemplate = async (
+    id: string,
+    tpl: Partial<EmailTemplate>
+  ) => {
+    try {
+      const response = await updateTemplateRequest(
+        id,
+        {
+          name: tpl.name,
+          subject: tpl.subject,
+          description: tpl.description,
+          category: tpl.category,
+          body: tpl.body,
+          isDefault: tpl.isDefault,
+          iconBg: tpl.iconBg,
+        }
+      );
+
+      const updatedTemplate = response.template;
+
+      setTemplates((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? updatedTemplate
+            : item
+        )
+      );
+
+      showToast(
+        'Template Updated',
+        'Template changes have been saved.'
+      );
+    } catch (error) {
+      console.error('Failed to update template:', error);
+
+      showToast(
+        'Template Update Failed',
+        error instanceof Error
+          ? error.message
+          : 'Unable to update template.',
+        'error'
+      );
+    }
   };
 
-  const deleteTemplate = (id: string) => {
-    setTemplates((prev) => prev.filter((item) => item.id !== id));
-    showToast('Template Deleted', 'Template removed.', 'info');
+
+  const deleteTemplate = async (id: string) => {
+    try {
+      await deleteTemplateRequest(id);
+
+      setTemplates((prev) =>
+        prev.filter((item) => item.id !== id)
+      );
+
+      showToast(
+        'Template Deleted',
+        'Template removed.',
+        'info'
+      );
+    } catch (error) {
+      console.error('Failed to delete template:', error);
+
+      showToast(
+        'Template Delete Failed',
+        error instanceof Error
+          ? error.message
+          : 'Unable to delete template.',
+        'error'
+      );
+    }
   };
 
   const addActivity = (act: Omit<ActivityItem, 'id'>) => {

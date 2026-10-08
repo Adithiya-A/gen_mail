@@ -52,3 +52,22 @@ class GenerateEmailFromIntentRequest(BaseModel):
     timing: str
     tone: str
     length: str
+
+class TemplateCreate(BaseModel):
+    name: str
+    subject: str
+    description: str
+    category: str
+    body: str
+    isDefault: bool = False
+    iconBg: str | None = None
+
+
+class TemplateUpdate(BaseModel):
+    name: str | None = None
+    subject: str | None = None
+    description: str | None = None
+    category: str | None = None
+    body: str | None = None
+    isDefault: bool | None = None
+    iconBg: str | None = None
