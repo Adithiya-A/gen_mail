@@ -3,12 +3,19 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr
 
 
+class EmailAttachment(BaseModel):
+    name: str
+    type: str | None = None
+    size: int
+    data: str
+
 class EmailCreate(BaseModel):
     to: EmailStr
     cc: str | None = None
     bcc: str | None = None
     subject: str
     body: str
+    attachments: list[EmailAttachment] = []
     scheduled_at: datetime | None = None
 
 class EmailUpdate(BaseModel):
@@ -17,6 +24,7 @@ class EmailUpdate(BaseModel):
     bcc: str | None = None
     subject: str | None = None
     body: str | None = None
+    attachments: list[EmailAttachment] | None = None
     scheduled_at: datetime | None = None
     status: str | None = None
 
@@ -71,3 +79,16 @@ class TemplateUpdate(BaseModel):
     body: str | None = None
     isDefault: bool | None = None
     iconBg: str | None = None
+
+class ContactCreate(BaseModel):
+    name: str
+    email: EmailStr
+    role: str = "Contact"
+    tag: str = "Professional"
+
+
+class ContactUpdate(BaseModel):
+    name: str | None = None
+    email: EmailStr | None = None
+    role: str | None = None
+    tag: str | None = None

@@ -27,12 +27,20 @@ const getApiErrorMessage = async (
   }
 };
 
+export interface EmailAttachment {
+  name: string;
+  size: number;
+  type?: string;
+  data: string;
+}
+
 export interface CreateEmailData {
   to: string;
   cc?: string;
   bcc?: string;
   subject: string;
   body: string;
+  attachments?: EmailAttachment[];
   scheduled_at?: string | null;
 }
 
@@ -66,7 +74,11 @@ export const createEmail = async (
 
     console.error('Create email API error:', errorMessage);
 
-    throw new Error(errorMessage);
+    throw new Error(
+      typeof errorMessage === 'string'
+        ? errorMessage
+        : JSON.stringify(errorMessage, null, 2)
+    );
   }
 
   return response.json();
@@ -110,6 +122,7 @@ export const updateEmail = async (
     bcc?: string;
     subject?: string;
     body?: string;
+    attachments?: EmailAttachment[];
     scheduled_at?: string | null;
     status?: string;
   }

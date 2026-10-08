@@ -1,9 +1,16 @@
 from datetime import datetime, timezone
 from uuid import uuid4
+import base64
 
 from firebase_admin import firestore
+from app.services.storage_service import (
+    upload_attachment,
+    download_attachment,
+)
 
 import base64
+import re
+from html import unescape
 from email.message import EmailMessage
 from app.core.gmail import get_gmail_service
 
@@ -33,12 +40,77 @@ def create_email(user_id: str, email_data: dict):
         "bcc": email_data.get("bcc"),
         "subject": email_data.get("subject"),
         "body": email_data.get("body"),
+        "attachments": email_data.get("attachments", []),
         "status": "DRAFT",
         "scheduled_at": email_data.get("scheduled_at"),
         "sent_at": None,
         "created_at": now,
         "updated_at": now,
     }
+
+    attachments = email_data.get("attachments", [])
+
+    safe_attachments = []
+
+    for attachment in attachments:
+        attachment_name = str(
+            attachment.get("name", "attachment")
+        )
+
+        attachment_type = str(
+            attachment.get("type")
+            or "application/octet-stream"
+        )
+
+        attachment_data = str(
+            attachment.get("data", "")
+        )
+
+        if "," in attachment_data:
+            _, encoded_data = attachment_data.split(",", 1)
+        else:
+            encoded_data = attachment_data
+
+        file_bytes = base64.b64decode(encoded_data)
+
+        storage_path = (
+            f"users/{user_id}/emails/{email_id}/attachments/"
+            f"{attachment_name}"
+        )
+
+        upload_attachment(
+            file_bytes=file_bytes,
+            storage_path=storage_path,
+            content_type=attachment_type,
+        )
+
+        safe_attachments.append({
+            "name": attachment_name,
+            "size": int(
+                attachment.get(
+                    "size",
+                    len(file_bytes),
+                )
+            ),
+            "type": attachment_type,
+            "storage_path": storage_path,
+        })
+
+    email["attachments"] = safe_attachments
+
+    print(
+        "DEBUG Firestore attachments:",
+        [
+            {
+                "name": a.get("name"),
+                "size": a.get("size"),
+                "type": a.get("type"),
+                "data_type": type(a.get("data")).__name__,
+                "data_length": len(a.get("data", "")),
+            }
+            for a in email["attachments"]
+        ],
+    )
 
     email_ref.set(email)
 
@@ -198,7 +270,57 @@ def send_email(user_id: str, email_id: str):
         if email_data.get("bcc"):
             message["Bcc"] = email_data["bcc"]
 
-        message.set_content(email_data["body"])
+        html_body = email_data.get("body") or ""
+
+        plain_text = re.sub(r"<br\s*/?>", "\n", html_body, flags=re.IGNORECASE,)
+
+        plain_text = re.sub(r"</p\s*>", "\n\n", plain_text, flags=re.IGNORECASE,)
+
+        plain_text = re.sub(r"<[^>]+>", "", plain_text,)
+
+        plain_text = unescape(plain_text).strip()
+
+        message.set_content(plain_text)
+        message.add_alternative(
+            html_body,
+            subtype="html",
+        )
+
+        attachments = email_data.get("attachments", [])
+
+        for attachment in attachments:
+            filename = attachment.get("name") or "attachment"
+
+            content_type = (
+                attachment.get("type")
+                or "application/octet-stream"
+            )
+
+            storage_path = attachment.get("storage_path")
+
+            if not storage_path:
+                print(
+                    f"Attachment {filename} has no storage path"
+                )
+                continue
+
+            file_bytes = download_attachment(storage_path)
+
+            if "/" in content_type:
+                maintype, subtype = content_type.split(
+                    "/",
+                    1,
+                )
+            else:
+                maintype = "application"
+                subtype = "octet-stream"
+
+            message.add_attachment(
+                file_bytes,
+                maintype=maintype,
+                subtype=subtype,
+                filename=filename,
+            )
 
         # Encode email for Gmail API
         encoded_message = base64.urlsafe_b64encode(

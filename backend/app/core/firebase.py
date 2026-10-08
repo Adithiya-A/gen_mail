@@ -1,5 +1,5 @@
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials, auth, storage
 from pathlib import Path
 
 
@@ -15,7 +15,12 @@ SERVICE_ACCOUNT_PATH = (
 # Initialize Firebase only once
 if not firebase_admin._apps:
     cred = credentials.Certificate(str(SERVICE_ACCOUNT_PATH))
-    firebase_admin.initialize_app(cred)
+    firebase_admin.initialize_app(
+        cred,
+        {
+            "storageBucket": "genmail-ai.firebasestorage.app"
+        }
+    )
 
 
 def verify_firebase_token(id_token: str):

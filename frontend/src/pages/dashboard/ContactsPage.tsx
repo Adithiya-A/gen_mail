@@ -4,32 +4,30 @@ import {
   Users,
   Plus,
   Search,
-  Mail,
-  MoreVertical,
   Sparkles,
-  Phone,
   Trash2,
+  Pencil,
 } from 'lucide-react';
 import { useEmailContext } from '../../context/EmailContext';
+import { Contact } from '../../services/contactsService';
 
 export const ContactsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setPromptConfig, showToast } = useEmailContext();
-
-  const [contacts, setContacts] = useState([
-    { id: '1', name: 'Dr. K. Sharma', email: 'professor@pec.edu.in', role: 'Project Guide / Professor', tag: 'Academic', initials: 'KS', bg: 'bg-purple-100 text-[#635BFF]' },
-    { id: '2', name: 'Mentor Team', email: 'mentor@pec.edu.in', role: 'Technical Advisor', tag: 'Academic', initials: 'MT', bg: 'bg-indigo-100 text-indigo-700' },
-    { id: '3', name: 'Core Engineering Team', email: 'team@company.com', role: 'Development Team', tag: 'Professional', initials: 'CT', bg: 'bg-blue-100 text-blue-700' },
-    { id: '4', name: 'Campus Recruiter', email: 'recruiter@abc.com', role: 'Talent Acquisition', tag: 'Professional', initials: 'CR', bg: 'bg-emerald-100 text-emerald-700' },
-    { id: '5', name: 'HR Department', email: 'hr@xyz.com', role: 'Human Resources', tag: 'Professional', initials: 'HR', bg: 'bg-orange-100 text-orange-700' },
-    { id: '6', name: 'Divya R', email: 'divya@student.pec.edu.in', role: 'Classmate / Peer', tag: 'Personal', initials: 'DR', bg: 'bg-rose-100 text-rose-700' },
-  ]);
+  const {
+    contacts,
+    addContact,
+    editContact,
+    removeContact,
+    setPromptConfig,
+    showToast,
+  } = useEmailContext();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState('');
+  const [editingContact, setEditingContact] = useState<Contact | null>(null);
 
   const filtered = contacts.filter(
     (c) =>
@@ -46,31 +44,90 @@ export const ContactsPage: React.FC = () => {
     navigate('/compose');
   };
 
-  const handleAddContact = (e: React.FormEvent) => {
+  const handleAddContact = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!newName.trim() || !newEmail.trim()) return;
 
-    const newContact = {
-      id: Date.now().toString(),
-      name: newName,
-      email: newEmail,
-      role: newRole || 'Contact',
-      tag: 'Professional',
-      initials: newName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase(),
-      bg: 'bg-purple-100 text-[#635BFF]',
-    };
+    try {
+      await addContact({
+        name: newName.trim(),
+        email: newEmail.trim(),
+        role: newRole.trim() || 'Contact',
+        tag: 'Professional',
+      });
 
-    setContacts([newContact, ...contacts]);
-    setShowAddModal(false);
-    setNewName('');
-    setNewEmail('');
-    setNewRole('');
-    showToast('Contact Added', `${newName} added to your contacts.`);
+      setShowAddModal(false);
+      setNewName('');
+      setNewEmail('');
+      setNewRole('');
+
+      showToast(
+        'Contact Added',
+        `${newName.trim()} added to your contacts.`
+      );
+    } catch (error) {
+      console.error('Failed to add contact:', error);
+
+      showToast(
+        'Error',
+        'Failed to add contact. Please try again.',
+        'error'
+      );
+    }
   };
 
-  const handleDeleteContact = (id: string) => {
-    setContacts(contacts.filter((c) => c.id !== id));
-    showToast('Contact Removed', 'Contact was removed from your list.', 'info');
+  const handleEditContact = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!editingContact) return;
+
+    if (!editingContact.name.trim() || !editingContact.email.trim()) {
+      return;
+    }
+
+    try {
+      await editContact(editingContact.id, {
+        name: editingContact.name.trim(),
+        email: editingContact.email.trim(),
+        role: editingContact.role.trim() || 'Contact',
+      });
+
+      setEditingContact(null);
+
+      showToast(
+        'Contact Updated',
+        `${editingContact.name.trim()} was updated successfully.`
+      );
+    } catch (error) {
+      console.error('Failed to update contact:', error);
+
+      showToast(
+        'Error',
+        'Failed to update contact. Please try again.',
+        'error'
+      );
+    }
+  };
+
+  const handleDeleteContact = async (id: string) => {
+    try {
+      await removeContact(id);
+
+      showToast(
+        'Contact Removed',
+        'Contact was removed from your list.',
+        'info'
+      );
+    } catch (error) {
+      console.error('Failed to delete contact:', error);
+
+      showToast(
+        'Error',
+        'Failed to remove contact. Please try again.',
+        'error'
+      );
+    }
   };
 
   return (
@@ -124,9 +181,9 @@ export const ContactsPage: React.FC = () => {
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div
-                    className={`w-11 h-11 rounded-2xl ${contact.bg} font-bold text-sm flex items-center justify-center shadow-xs flex-shrink-0`}
+                    className={`w-11 h-11 rounded-2xl bg-purple-100 text-[#635BFF] font-bold text-sm flex items-center justify-center shadow-xs flex-shrink-0`}
                   >
-                    {contact.initials}
+                    {contact.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-[#13182E] group-hover:text-[#635BFF] transition-colors">
@@ -137,13 +194,23 @@ export const ContactsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleDeleteContact(contact.id)}
-                  className="text-slate-300 hover:text-rose-500 p-1 transition-colors"
-                  title="Delete contact"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setEditingContact({ ...contact })}
+                    className="text-slate-300 hover:text-[#635BFF] p-1 transition-colors"
+                    title="Edit contact"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    onClick={() => handleDeleteContact(contact.id)}
+                    className="text-slate-300 hover:text-rose-500 p-1 transition-colors"
+                    title="Delete contact"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Action */}
@@ -219,6 +286,98 @@ export const ContactsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Edit Contact Modal */}
+      {editingContact && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-5">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Edit Contact
+              </h2>
+              <p className="mt-1 text-sm text-gray-500">
+                Update the contact details below.
+              </p>
+            </div>
+
+            <form onSubmit={handleEditContact} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Full Name
+                </label>
+
+                <input
+                  type="text"
+                  value={editingContact.name}
+                  onChange={(e) =>
+                    setEditingContact({
+                      ...editingContact,
+                      name: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-[#635BFF]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Email Address
+                </label>
+
+                <input
+                  type="email"
+                  value={editingContact.email}
+                  onChange={(e) =>
+                    setEditingContact({
+                      ...editingContact,
+                      email: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-[#635BFF]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-gray-700">
+                  Role / Designation
+                </label>
+
+                <input
+                  type="text"
+                  value={editingContact.role}
+                  onChange={(e) =>
+                    setEditingContact({
+                      ...editingContact,
+                      role: e.target.value,
+                    })
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 outline-none focus:border-[#635BFF]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingContact(null)}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="rounded-lg bg-[#635BFF] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      
     </div>
   );
 };

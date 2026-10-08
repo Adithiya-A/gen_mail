@@ -5,6 +5,7 @@ import {
   Sparkles,
   User,
   FileText,
+  Paperclip,
   Copy,
   Check,
   RotateCw,
@@ -58,11 +59,12 @@ export const GeneratedEmailPage: React.FC = () => {
           result
         );
 
-        setGeneratedDraft({
+        setGeneratedDraft((prev) => ({
+          ...prev,
           to: intent.recipient,
           subject: result.subject,
           body: result.body,
-        });
+        }));
       } catch (error) {
         console.error(
           'Email generation failed:',
@@ -125,11 +127,12 @@ export const GeneratedEmailPage: React.FC = () => {
         length: intent.length,
       });
 
-      setGeneratedDraft({
+      setGeneratedDraft((prev) => ({
+        ...prev,
         to: intent.recipient,
         subject: result.subject,
         body: result.body,
-      });
+      }));
 
       showToast(
         'Email Regenerated',
@@ -248,6 +251,39 @@ export const GeneratedEmailPage: React.FC = () => {
             {generatedDraft.body}
           </div>
         </div>
+
+        {generatedDraft.attachments &&
+          generatedDraft.attachments.length > 0 && (
+            <div className="rounded-2xl border border-[#E8EBF8] bg-[#FAFBFF] p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Paperclip className="w-4 h-4 text-[#635BFF]" />
+                <span className="text-xs font-bold text-[#64748B] uppercase tracking-wider">
+                  Attachments
+                </span>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {generatedDraft.attachments.map((attachment, index) => (
+                  <div
+                    key={`${attachment.name}-${index}`}
+                    className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-purple-50 text-[#635BFF] border border-purple-200"
+                  >
+                    <FileText className="w-4 h-4" />
+
+                    <span className="text-xs font-semibold text-[#13182E]">
+                      {attachment.name}
+                    </span>
+
+                    <span className="text-[10px] text-slate-500">
+                      {attachment.size >= 1024 * 1024
+                        ? `${(attachment.size / (1024 * 1024)).toFixed(1)} MB`
+                        : `${Math.max(1, Math.round(attachment.size / 1024))} KB`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
         {/* Bottom Actions Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-100">

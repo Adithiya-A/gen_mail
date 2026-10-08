@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,10 +10,12 @@ from app.routes.emails import router as email_router
 from app.routes.gmail import router as gmail_router
 from app.routes.ai import router as ai_router
 from app.routes.templates import router as templates_router
+from app.routes.contacts import router as contacts_router
 
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from app.services.scheduler_service import process_scheduled_emails
+from app.services.storage_service import upload_attachment
 
 
 scheduler = BackgroundScheduler()
@@ -88,8 +93,23 @@ def get_me(current_user: dict = Depends(get_current_user)):
         "picture": current_user.get("picture"),
         "firestore_user": firestore_user,
     }
+@app.get("/test-supabase-storage")
+def test_supabase_storage():
+    test_data = b"GenMail Supabase storage test"
+
+    result = upload_attachment(
+        file_bytes=test_data,
+        storage_path="tests/genmail-test.txt",
+        content_type="text/plain",
+    )
+
+    return {
+        "message": "Supabase upload successful",
+        "result": result,
+    }
 
 app.include_router(email_router)
 app.include_router(gmail_router)
 app.include_router(ai_router)
 app.include_router(templates_router)
+app.include_router(contacts_router)

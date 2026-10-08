@@ -26,6 +26,13 @@ export const ReviewEditPage: React.FC = () => {
     setCurrentEmailId,
   } = useEmailContext();
 
+  interface EmailAttachment {
+    name: string;
+    size: number;
+    type?: string;
+    data: string;
+  }
+
 const location = useLocation();
 
 const draftId = location.state?.draftId as | string | undefined;
@@ -35,6 +42,7 @@ const draftFromNavigation =
     to: string;
     subject: string;
     body: string;
+    attachments?: EmailAttachment[];
   } | undefined;
 
 const scheduledAt = location.state?.scheduledAt;
@@ -42,6 +50,9 @@ const scheduledAt = location.state?.scheduledAt;
 const [to, setTo] = useState(draftFromNavigation?.to ?? generatedDraft.to);
 const [subject, setSubject] = useState(draftFromNavigation?.subject ?? generatedDraft.subject);
 const [body, setBody] = useState(draftFromNavigation?.body ?? generatedDraft.body);
+const [attachments, setAttachments] = useState<EmailAttachment[]>(
+  draftFromNavigation?.attachments ?? generatedDraft.attachments ?? []
+);
 const [isSavingDraft, setIsSavingDraft] = useState(false);
 
 const handleSaveDraft = async () => {
@@ -69,6 +80,7 @@ const handleSaveDraft = async () => {
         to,
         subject,
         body,
+        attachments,
       });
     } else {
       // New draft
@@ -76,6 +88,7 @@ const handleSaveDraft = async () => {
         to,
         subject,
         body,
+        attachments,
         scheduled_at: null,
       });
 
@@ -89,6 +102,7 @@ const handleSaveDraft = async () => {
       to,
       subject,
       body,
+      attachments,
     });
 
     navigate('/drafts');
@@ -126,6 +140,7 @@ const handleSaveDraft = async () => {
       to,
       subject,
       body,
+      attachments,
     });
 
     setCurrentEmailId(draftId ?? null);
@@ -191,6 +206,8 @@ const handleSaveDraft = async () => {
         <RichTextEditor
           value={body}
           onChange={setBody}
+          initialAttachments={attachments}
+          onAttachmentsChange={setAttachments}
           showSendButton={false}
           maxChars={2000}
         />

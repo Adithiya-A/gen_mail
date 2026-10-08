@@ -21,6 +21,7 @@ export const ComposePage: React.FC = () => {
   const {
     promptConfig,
     setPromptConfig,
+    setGeneratedDraft,
     generateEmailFromPrompt,
     isGeneratingAI,
   } = useEmailContext();
@@ -30,6 +31,12 @@ export const ComposePage: React.FC = () => {
   const [length, setLength] = useState(promptConfig.length);
   const [purpose, setPurpose] = useState(promptConfig.purpose);
   const [attachment, setAttachment] = useState<string | null>(promptConfig.attachmentName || null);
+  const [selectedAttachment, setSelectedAttachment] = useState<{
+    name: string;
+    size: number;
+    type?: string;
+    data: string;
+  } | null>(null);
 
   const suggestedPrompts = [
     {
@@ -122,11 +129,42 @@ const handleGenerate = async () => {
   const handleAttachSim = () => {
     const input = document.createElement('input');
     input.type = 'file';
+
     input.onchange = (e: any) => {
-      if (e.target.files && e.target.files[0]) {
-        setAttachment(e.target.files[0].name);
+      const file = e.target.files?.[0];
+
+      if (!file) {
+        return;
       }
+
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const data = reader.result;
+
+        if (typeof data !== 'string') {
+          return;
+        }
+
+        const newAttachment = {
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          data,
+        };
+
+        setAttachment(file.name);
+        setSelectedAttachment(newAttachment);
+
+        setGeneratedDraft((prev) => ({
+          ...prev,
+          attachments: [newAttachment],
+        }));
+      };
+
+      reader.readAsDataURL(file);
     };
+
     input.click();
   };
 

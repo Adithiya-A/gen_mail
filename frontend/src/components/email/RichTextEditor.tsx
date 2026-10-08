@@ -24,23 +24,39 @@ import {
 interface RichTextEditorProps {
   value: string;
   onChange: (val: string) => void;
+  initialAttachments?: Array<{
+    name: string;
+    size: number;
+    type?: string;
+    data: string;
+  }>;
   placeholder?: string;
   maxChars?: number;
   showSendButton?: boolean;
   onSend?: () => void;
   showVariables?: boolean;
   onInsertVariable?: (variable: string) => void;
+  onAttachmentsChange?: (
+    attachments: Array<{
+      name: string;
+      size: number;
+      type?: string;
+      data: string;
+    }>
+  ) => void;
 }
 
 export const RichTextEditor: React.FC<RichTextEditorProps> = ({
   value,
   onChange,
+  initialAttachments = [],
   placeholder = 'Type your email content here...',
   maxChars = 2000,
   showSendButton = false,
   onSend,
   showVariables = false,
   onInsertVariable,
+  onAttachmentsChange,
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -67,7 +83,16 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
   const [imageTab, setImageTab] = useState<'upload' | 'url'>('upload');
 
   // Attachments
-  const [attachments, setAttachments] = useState<Array<{ name: string; size: string; type?: string }>>([]);
+  const [attachments, setAttachments] = useState<
+    Array<{
+      name: string;
+      size: number;
+      type?: string;
+      data: string;
+    }>
+  >(initialAttachments);
+
+  const attachmentsRef = useRef(attachments);
 
   // Character counter
   const [charCount, setCharCount] = useState(0);
@@ -317,23 +342,46 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const filesList: File[] = Array.from(e.target.files);
-      const newFiles = filesList.map((file: File) => {
-        const sizeMb = file.size / (1024 * 1024);
-        const sizeStr = sizeMb >= 1 ? `${sizeMb.toFixed(1)} MB` : `${Math.round(file.size / 1024)} KB`;
-        return {
+    const filesList: File[] = Array.from(e.target.files || []);
+
+    filesList.forEach((file) => {
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        const result = reader.result;
+
+        if (typeof result !== 'string') {
+          return;
+        }
+
+        const newFile = {
           name: file.name,
-          size: sizeStr,
-          type: file.type || 'Document',
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          data: result,
         };
-      });
-      setAttachments((prev) => [...prev, ...newFiles]);
-    }
+
+        const updated = [...attachmentsRef.current, newFile];
+
+        attachmentsRef.current = updated;
+        setAttachments(updated);
+        onAttachmentsChange?.(updated);
+      };
+
+      reader.readAsDataURL(file);
+    });
+
+    e.target.value = '';
   };
 
-  const handleRemoveAttachment = (idx: number) => {
-    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  const handleRemoveAttachment = (index: number) => {
+    const updated = attachmentsRef.current.filter(
+      (_, i) => i !== index
+    );
+
+    attachmentsRef.current = updated;
+    setAttachments(updated);
+    onAttachmentsChange?.(updated);
   };
 
   return (
@@ -589,7 +637,13 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
                 >
                   <FileText className="w-3.5 h-3.5 text-[#635BFF]" />
                   <span className="font-medium text-[#13182E]">{att.name}</span>
-                  <span className="text-[10px] text-slate-500">({att.size})</span>
+                  <span className="text-[10px] text-slate-500">
+                    (
+                    {att.size >= 1024 * 1024
+                      ? `${(att.size / (1024 * 1024)).toFixed(1)} MB`
+                      : `${Math.round(att.size / 1024)} KB`}
+                    )
+                  </span>
                   <button
                     type="button"
                     onClick={() => handleRemoveAttachment(idx)}

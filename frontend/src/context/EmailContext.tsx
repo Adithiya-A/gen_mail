@@ -20,12 +20,24 @@ import {
   deleteTemplate as deleteTemplateRequest,
 } from '../services/templateService';
 
+import {
+  Contact,
+  ContactCreate,
+  ContactUpdate,
+  getContacts,
+  createContact,
+  updateContact,
+  deleteContact,
+} from '../services/contactsService';
+
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../config/firebase';
+import { auth, db } from '../config/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+
 import {
   UserProfile,
-  EmailItem,
   IntentData,
+  EmailItem,
   EmailTemplate,
   ActivityItem,
   initialUser,
@@ -34,8 +46,6 @@ import {
   initialSentEmails,
   initialTrackingEmails,
   initialTemplates,
-  initialActivities,
-  initialInboxEmails,
 } from '../data/mockData';
 
 export interface ToastNotification {
@@ -62,55 +72,92 @@ export interface ScheduleConfig {
   sendReminder: boolean;
 }
 
+interface EmailAttachment {
+  name: string;
+  size: number;
+  type?: string;
+  data: string;
+}
+
+type BackendEmailItem = Omit<EmailItem, 'attachment'> & {
+  attachments: EmailAttachment[];
+};
+
 interface EmailContextType {
   user: UserProfile;
-  updateUser: (fields: Partial<UserProfile>) => void;
+  updateUser: (fields: Partial<UserProfile>) => Promise<void>;
   stats: typeof initialStats;
-  
+
   // Prompt & AI Generation Pipeline
   promptConfig: PromptConfig;
   setPromptConfig: React.Dispatch<React.SetStateAction<PromptConfig>>;
   intentData: IntentData;
   setIntentData: React.Dispatch<React.SetStateAction<IntentData>>;
   updateIntentItem: (key: keyof IntentData, val: any) => void;
-  
-  generatedDraft: { to: string; subject: string; body: string };
-  setGeneratedDraft: React.Dispatch<React.SetStateAction<{ to: string; subject: string; body: string }>>;
-  
+
+  generatedDraft: {
+    to: string;
+    subject: string;
+    body: string;
+    attachments?: Array<{
+      name: string;
+      size: number;
+      type?: string;
+      data: string;
+    }>;
+  };
+
+  setGeneratedDraft: React.Dispatch<
+    React.SetStateAction<{
+      to: string;
+      subject: string;
+      body: string;
+      attachments?: Array<{
+        name: string;
+        size: number;
+        type?: string;
+        data: string;
+      }>;
+    }>
+  >;
+
   scheduleConfig: ScheduleConfig;
   setScheduleConfig: React.Dispatch<React.SetStateAction<ScheduleConfig>>;
-  
+
   // Data lists
-  inboxEmails: EmailItem[];
-  selectedInboxEmail: EmailItem | null;
-  setSelectedInboxEmail: (email: EmailItem | null) => void;
+  inboxEmails: BackendEmailItem[];
+  selectedInboxEmail: BackendEmailItem | null;
+  setSelectedInboxEmail: (email: BackendEmailItem | null) => void;
   toggleStarInbox: (id: string) => void;
   toggleReadInbox: (id: string) => void;
   deleteInboxEmail: (id: string) => void;
   syncInbox: () => void;
   isSyncing: boolean;
 
-  scheduledEmails: EmailItem[];
-  addScheduledEmail: (email: Omit<EmailItem, 'id'>) => void;
+  scheduledEmails: BackendEmailItem[];
+  addScheduledEmail: (email: Omit<BackendEmailItem, 'id'>) => void;
   deleteScheduledEmail: (id: string) => Promise<void>;
 
-  draftEmails: EmailItem[];
+  draftEmails: BackendEmailItem[];
   updateDraft: (
     id: string,
     email: {
       to: string;
       subject: string;
       body: string;
+      attachments?: EmailAttachment[];
     }
   ) => Promise<void>;
   deleteDraft: (id: string) => Promise<void>;
 
-  sentEmails: EmailItem[];
-  addSentEmail: (email: Omit<EmailItem, 'id'>) => void;
+  sentEmails: BackendEmailItem[];
+  addSentEmail: (email: Omit<BackendEmailItem, 'id'>) => void;
   deleteSentEmail: (id: string) => Promise<void>;
 
-  trackingEmails: EmailItem[];
+  trackingEmails: BackendEmailItem[];
+
   templates: EmailTemplate[];
+
   addTemplate: (
     tpl: Omit<EmailTemplate, 'id'>
   ) => Promise<void>;
@@ -127,6 +174,15 @@ interface EmailContextType {
   activities: ActivityItem[];
   addActivity: (act: Omit<ActivityItem, 'id'>) => void;
 
+  contacts: Contact[];
+  loadContacts: () => Promise<void>;
+  addContact: (data: ContactCreate) => Promise<Contact>;
+  editContact: (
+    id: string,
+    data: ContactUpdate
+  ) => Promise<Contact>;
+  removeContact: (id: string) => Promise<void>;
+
   // Gmail OAuth State
   isGmailConnected: boolean;
   connectGmail: () => Promise<string>;
@@ -137,85 +193,133 @@ interface EmailContextType {
   isGeneratingAI: boolean;
   currentEmailId: string | null;
   setCurrentEmailId: (id: string | null) => void;
-  completeScheduleOrSend: (overrideConfig?: Partial<ScheduleConfig>) => Promise<string>;
+  completeScheduleOrSend: (
+    overrideConfig?: Partial<ScheduleConfig>
+  ) => Promise<string>;
 
   // Toasts
   toasts: ToastNotification[];
-  showToast: (title: string, message: string, type?: 'success' | 'info' | 'error') => void;
+  showToast: (
+    title: string,
+    message: string,
+    type?: 'success' | 'info' | 'error'
+  ) => void;
   removeToast: (id: string) => void;
 
   saveDraft: (
-  email: {
-    to: string;
-    subject: string;
-    body: string;
-  }
-) => Promise<string>;
+    email: {
+      to: string;
+      subject: string;
+      body: string;
+      attachments?: EmailAttachment[];
+    }
+  ) => Promise<string>;
 }
 
-const EmailContext = createContext<EmailContextType | undefined>(undefined);
+const EmailContext = createContext<EmailContextType | undefined>(
+  undefined
+);
 
-export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-
+export const EmailProvider: React.FC<{
+  children: React.ReactNode;
+}> = ({ children }) => {
   const [user, setUser] = useState<UserProfile>(initialUser);
   const [stats, setStats] = useState(initialStats);
-  const [isGmailConnected, setIsGmailConnected] = useState<boolean>(false);
+  const [isGmailConnected, setIsGmailConnected] =
+    useState<boolean>(false);
 
   // Workflow states
-  const [promptConfig, setPromptConfig] = useState<PromptConfig>({
-    promptText: 'Write an email to my professor requesting permission for leave tomorrow due to health issues.',
-    tone: 'Professional',
-    length: 'Medium',
-    purpose: 'Request',
-    attachmentName: '',
-  });
+  const [promptConfig, setPromptConfig] =
+    useState<PromptConfig>({
+      promptText:
+        'Write an email to my professor requesting permission for leave tomorrow due to health issues.',
+      tone: 'Professional',
+      length: 'Medium',
+      purpose: 'Request',
+      attachmentName: '',
+    });
 
-  const [intentData, setIntentData] = useState<IntentData>({
-    recipient: 'professor@pec.edu.in',
-    purpose: 'Request for leave',
-    tone: 'Professional',
-    dateTime: 'Tomorrow (Auto-detected)',
-    keyPoints: ['Health issues', 'Need rest', 'Will complete pending work'],
-  });
+  const [intentData, setIntentData] =
+    useState<IntentData>({
+      recipient: 'professor@pec.edu.in',
+      purpose: 'Request for leave',
+      tone: 'Professional',
+      dateTime: 'Tomorrow (Auto-detected)',
+      keyPoints: [
+        'Health issues',
+        'Need rest',
+        'Will complete pending work',
+      ],
+    });
 
-  const [generatedDraft, setGeneratedDraft] = useState({
-    to: 'professor@pec.edu.in',
-    subject: 'Request for Leave Tomorrow',
-    body: `Dear Sir/Madam,\n\nI hope you are doing well. I am writing to request permission for leave tomorrow due to health issues. I am currently not feeling well and need to take rest for a speedy recovery.\n\nI will make sure to complete any pending work and stay updated with the class materials.\n\nThank you for your understanding.\n\nYours sincerely,\nAarthi`,
-  });
+  const [generatedDraft, setGeneratedDraft] =
+    useState({
+      to: '',
+      subject: '',
+      body: '',
+      attachments: [] as EmailAttachment[],
+    });
 
-  const [currentEmailId, setCurrentEmailId] = useState<string | null>(null);
+  const [currentEmailId, setCurrentEmailId] =
+    useState<string | null>(null);
 
-  const todayFormatted = new Date().toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  const todayFormatted =
+    new Date().toLocaleDateString('en-US', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
 
-  const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>({
-    sendType: 'later',
-    date: todayFormatted,
-    time: '06:00 PM',
-    timeZone: '(GMT+5:30) Chennai, Kolkata, Mumbai, New Delhi',
-    sendReminder: true,
-  });
+  const [scheduleConfig, setScheduleConfig] =
+    useState<ScheduleConfig>({
+      sendType: 'later',
+      date: todayFormatted,
+      time: '06:00 PM',
+      timeZone:
+        '(GMT+5:30) Chennai, Kolkata, Mumbai, New Delhi',
+      sendReminder: true,
+    });
 
   // Collections
-  const [inboxEmails, setInboxEmails] = useState<EmailItem[]>(initialInboxEmails);
-  const [selectedInboxEmail, setSelectedInboxEmail] = useState<EmailItem | null>(initialInboxEmails[0]);
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [inboxEmails, setInboxEmails] =
+    useState<BackendEmailItem[]>([]);
 
-  const [scheduledEmails, setScheduledEmails] = useState<EmailItem[]>(initialScheduledEmails);
-  const [draftEmails, setDraftEmails] = useState<EmailItem[]>([]);
-  const [sentEmails, setSentEmails] = useState<EmailItem[]>(initialSentEmails);
-  const [trackingEmails, setTrackingEmails] = useState<EmailItem[]>(initialTrackingEmails);
-  const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
-  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [selectedInboxEmail, setSelectedInboxEmail] =
+    useState<BackendEmailItem | null>(null);
 
-  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
-  const [toasts, setToasts] = useState<ToastNotification[]>([]);
+  const [isSyncing, setIsSyncing] =
+    useState(false);
 
-  const convertBackendEmail = (email: any): EmailItem => {
+  const [scheduledEmails, setScheduledEmails] =
+    useState<BackendEmailItem[]>([]);
+
+  const [draftEmails, setDraftEmails] =
+    useState<BackendEmailItem[]>([]);
+
+  const [sentEmails, setSentEmails] =
+    useState<BackendEmailItem[]>([]);
+
+  const [trackingEmails, setTrackingEmails] =
+    useState<BackendEmailItem[]>([]);
+
+  const [templates, setTemplates] =
+    useState<EmailTemplate[]>(initialTemplates);
+
+  const [activities, setActivities] =
+    useState<ActivityItem[]>([]);
+
+  const [contacts, setContacts] =
+    useState<Contact[]>([]);
+
+  const [isGeneratingAI, setIsGeneratingAI] =
+    useState(false);
+
+  const [toasts, setToasts] =
+    useState<ToastNotification[]>([]);
+
+  const convertBackendEmail = (
+    email: any
+  ): BackendEmailItem => {
     const createdAt = email.created_at
       ? new Date(email.created_at)
       : new Date();
@@ -234,6 +338,8 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           (email.body?.length > 80 ? '...' : '') || '',
 
       body: email.body,
+
+      attachments: email.attachments ?? [],
 
       time: createdAt.toLocaleTimeString([], {
         hour: '2-digit',
@@ -258,15 +364,21 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       iconType: 'mail',
 
       scheduledTime: email.scheduled_at
-        ? new Date(email.scheduled_at).toLocaleString()
+        ? new Date(
+            email.scheduled_at
+          ).toLocaleString()
         : undefined,
 
       scheduledAt: email.scheduled_at
-        ? new Date(email.scheduled_at).toISOString()
+        ? new Date(
+            email.scheduled_at
+          ).toISOString()
         : undefined,
 
       sentTime: email.sent_at
-        ? new Date(email.sent_at).toLocaleString()
+        ? new Date(
+            email.sent_at
+          ).toLocaleString()
         : undefined,
     };
   };
@@ -313,10 +425,11 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const loadActivitiesFromBackend = async () => {
     try {
       const result = await getEmails();
+
       const backendEmails = result.emails || [];
 
-      const emailActivities: ActivityItem[] = backendEmails
-        .flatMap((email: any) => {
+      const emailActivities: ActivityItem[] =
+        backendEmails.flatMap((email: any) => {
           const activities: ActivityItem[] = [];
 
           if (email.sent_at) {
@@ -324,9 +437,14 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               id: `sent-${email.id}`,
               type: 'sent',
               title: 'Email sent',
-              description: `${email.subject} to ${email.to}`,
-              timestamp: new Date(email.sent_at).toLocaleString(),
-              iconBg: 'bg-emerald-100 text-emerald-600',
+              description:
+                `${email.subject} to ${email.to}`,
+              timestamp:
+                new Date(
+                  email.sent_at
+                ).toLocaleString(),
+              iconBg:
+                'bg-emerald-100 text-emerald-600',
             });
           }
 
@@ -335,9 +453,14 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               id: `scheduled-${email.id}`,
               type: 'scheduled',
               title: 'Email scheduled',
-              description: `${email.subject} to ${email.to}`,
-              timestamp: new Date(email.scheduled_at).toLocaleString(),
-              iconBg: 'bg-purple-100 text-purple-600',
+              description:
+                `${email.subject} to ${email.to}`,
+              timestamp:
+                new Date(
+                  email.scheduled_at
+                ).toLocaleString(),
+              iconBg:
+                'bg-purple-100 text-purple-600',
             });
           }
 
@@ -350,8 +473,12 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               type: 'draft',
               title: 'Draft saved',
               description: email.subject,
-              timestamp: new Date(email.created_at).toLocaleString(),
-              iconBg: 'bg-amber-100 text-amber-600',
+              timestamp:
+                new Date(
+                  email.created_at
+                ).toLocaleString(),
+              iconBg:
+                'bg-amber-100 text-amber-600',
             });
           }
 
@@ -371,7 +498,8 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const result = await getTemplates();
 
-      const backendTemplates = result.templates || [];
+      const backendTemplates =
+        result.templates || [];
 
       setTemplates(backendTemplates);
     } catch (error) {
@@ -382,179 +510,484 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const loadUserProfile = async (
+    firebaseUser: any
+  ) => {
+    try {
+      const profileRef = doc(
+        db,
+        'users',
+        firebaseUser.uid,
+        'profile',
+        'data'
+      );
+
+      const profileSnapshot =
+        await getDoc(profileRef);
+
+      if (!profileSnapshot.exists()) {
+        setUser((prev) => ({
+          ...prev,
+          name:
+            firebaseUser.displayName ||
+            prev.name,
+          email:
+            firebaseUser.email ||
+            prev.email,
+          avatar: firebaseUser.displayName
+            ? firebaseUser.displayName
+                .charAt(0)
+                .toUpperCase()
+            : prev.avatar,
+        }));
+
+        return;
+      }
+
+      const profileData =
+        profileSnapshot.data();
+
+      setUser((prev) => ({
+        ...prev,
+        ...profileData,
+        name:
+          profileData.name ||
+          firebaseUser.displayName ||
+          prev.name,
+        email:
+          profileData.email ||
+          firebaseUser.email ||
+          prev.email,
+        avatar:
+          profileData.avatar ||
+          (firebaseUser.displayName
+            ? firebaseUser.displayName
+                .charAt(0)
+                .toUpperCase()
+            : prev.avatar),
+      }));
+    } catch (error) {
+      console.error(
+        'Failed to load user profile:',
+        error
+      );
+
+      setUser((prev) => ({
+        ...prev,
+        name:
+          firebaseUser.displayName ||
+          prev.name,
+        email:
+          firebaseUser.email ||
+          prev.email,
+        avatar: firebaseUser.displayName
+          ? firebaseUser.displayName
+              .charAt(0)
+              .toUpperCase()
+          : prev.avatar,
+      }));
+    }
+  };
+
+  const loadContacts = async () => {
+    try {
+      const data = await getContacts();
+      setContacts(data);
+    } catch (error) {
+      console.error(
+        'Failed to load contacts:',
+        error
+      );
+    }
+  };
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      async (firebaseUser) => {
-        if (!firebaseUser) {
-          setIsGmailConnected(false);
-          return;
-        }
+    const unsubscribe =
+      onAuthStateChanged(
+        auth,
+        async (firebaseUser) => {
+          if (!firebaseUser) {
+            setIsGmailConnected(false);
+            return;
+          }
 
-        await loadEmailsFromBackend();
-        await loadActivitiesFromBackend();
-        await loadTemplatesFromBackend();
-
-        try {
-          const gmailStatus = await getGmailStatus();
-
-          setIsGmailConnected(Boolean(gmailStatus.connected));
-
-          setUser((prev) => ({
-            ...prev,
-            isConnected: Boolean(gmailStatus.connected),
-            connectedGmail: gmailStatus.email || '',
-            connectedDate: gmailStatus.connected_at
-              ? new Date(gmailStatus.connected_at).toLocaleDateString('en-US', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                })
-              : '',
-          }));
-        } catch (error) {
-          console.error(
-            'Failed to load Gmail connection status:',
-            error
+          await loadUserProfile(
+            firebaseUser
           );
 
-          setIsGmailConnected(false);
+          await loadEmailsFromBackend();
+          await loadActivitiesFromBackend();
+          await loadTemplatesFromBackend();
+          await loadContacts();
 
-          setUser((prev) => ({
-            ...prev,
-            isConnected: false,
-          }));
+          try {
+            const gmailStatus =
+              await getGmailStatus();
+
+            setIsGmailConnected(
+              Boolean(
+                gmailStatus.connected
+              )
+            );
+
+            setUser((prev) => ({
+              ...prev,
+              isConnected: Boolean(
+                gmailStatus.connected
+              ),
+              connectedGmail:
+                gmailStatus.email || '',
+              connectedDate:
+                gmailStatus.connected_at
+                  ? new Date(
+                      gmailStatus.connected_at
+                    ).toLocaleDateString(
+                      'en-US',
+                      {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      }
+                    )
+                  : '',
+            }));
+          } catch (error) {
+            console.error(
+              'Failed to load Gmail connection status:',
+              error
+            );
+
+            setIsGmailConnected(false);
+
+            setUser((prev) => ({
+              ...prev,
+              isConnected: false,
+            }));
+          }
         }
-      }
-    );
+      );
 
     return unsubscribe;
   }, []);
 
-  const showToast = (title: string, message: string, type: 'success' | 'info' | 'error' = 'success') => {
+  const showToast = (
+    title: string,
+    message: string,
+    type:
+      | 'success'
+      | 'info'
+      | 'error' = 'success'
+  ) => {
     const id = Date.now().toString();
-    setToasts((prev) => [...prev, { id, title, message, type }]);
+
+    setToasts((prev) => [
+      ...prev,
+      {
+        id,
+        title,
+        message,
+        type,
+      },
+    ]);
+
     setTimeout(() => {
       removeToast(id);
     }, 4500);
   };
 
   const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    setToasts((prev) =>
+      prev.filter((t) => t.id !== id)
+    );
   };
 
-  const updateUser = (fields: Partial<UserProfile>) => {
-    setUser((prev) => ({ ...prev, ...fields }));
-    showToast('Profile Updated', 'Your profile changes have been saved successfully.');
-  };
-
-  const connectGmail = async (): Promise<string> => {
-    return await requestGmailConnection();
-  };
-
-  const disconnectGmail = async (): Promise<void> => {
+  const updateUser = async (
+    fields: Partial<UserProfile>
+  ) => {
     try {
-      await requestGmailDisconnection();
+      const firebaseUser =
+        auth.currentUser;
 
-      setIsGmailConnected(false);
+      if (!firebaseUser) {
+        throw new Error(
+          'User is not authenticated'
+        );
+      }
 
-      setUser((prev) => ({
-        ...prev,
-        isConnected: false,
-        connectedGmail: '',
-        connectedDate: '',
-      }));
+      const updatedUser = {
+        ...user,
+        ...fields,
+      };
+
+      await setDoc(
+        doc(
+          db,
+          'users',
+          firebaseUser.uid,
+          'profile',
+          'data'
+        ),
+        {
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          bio: updatedUser.bio,
+          avatar: updatedUser.avatar,
+          updated_at:
+            new Date().toISOString(),
+        },
+        { merge: true }
+      );
+
+      setUser(updatedUser);
 
       showToast(
-        'Gmail Disconnected',
-        'Your Gmail account has been disconnected.',
-        'info'
+        'Profile Updated',
+        'Your profile changes have been saved successfully.'
       );
     } catch (error) {
-      console.error('Failed to disconnect Gmail:', error);
-
-      showToast(
-        'Gmail Disconnect Failed',
-        error instanceof Error
-          ? error.message
-          : 'Unable to disconnect Gmail.',
-        'error'
+      console.error(
+        'Failed to update profile:',
+        error
       );
 
-      throw error;
+      showToast(
+        'Profile Update Failed',
+        error instanceof Error
+          ? error.message
+          : 'Unable to save your profile changes.',
+        'error'
+      );
     }
   };
 
-  const updateIntentItem = (key: keyof IntentData, val: any) => {
-    setIntentData((prev) => ({ ...prev, [key]: val }));
+  const connectGmail =
+    async (): Promise<string> => {
+      return await requestGmailConnection();
+    };
+
+  const disconnectGmail =
+    async (): Promise<void> => {
+      try {
+        await requestGmailDisconnection();
+
+        setIsGmailConnected(false);
+
+        setUser((prev) => ({
+          ...prev,
+          isConnected: false,
+          connectedGmail: '',
+          connectedDate: '',
+        }));
+
+        showToast(
+          'Gmail Disconnected',
+          'Your Gmail account has been disconnected.',
+          'info'
+        );
+      } catch (error) {
+        console.error(
+          'Failed to disconnect Gmail:',
+          error
+        );
+
+        showToast(
+          'Gmail Disconnect Failed',
+          error instanceof Error
+            ? error.message
+            : 'Unable to disconnect Gmail.',
+          'error'
+        );
+
+        throw error;
+      }
+    };
+
+  const updateIntentItem = (
+    key: keyof IntentData,
+    val: any
+  ) => {
+    setIntentData((prev) => ({
+      ...prev,
+      [key]: val,
+    }));
   };
 
-  const generateEmailFromPrompt = async (customPrompt?: string) => {
-    setIsGeneratingAI(true);
-    const text = customPrompt || promptConfig.promptText;
+  const generateEmailFromPrompt =
+    async (customPrompt?: string) => {
+      setIsGeneratingAI(true);
 
-    // Simulate smart AI intent extraction and generation based on keywords
-    let rec = 'professor@pec.edu.in';
-    let pur = 'Request for leave';
-    let subj = 'Request for Leave Tomorrow';
-    let points = ['Health issues', 'Need rest', 'Will complete pending work'];
-    let dt = 'Tomorrow (Auto-detected)';
-    let bodyText = `Dear Sir/Madam,\n\nI hope you are doing well. I am writing to request permission for leave tomorrow due to health issues. I am currently not feeling well and need to take rest for a speedy recovery.\n\nI will make sure to complete any pending work and stay updated with the class materials.\n\nThank you for your understanding.\n\nYours sincerely,\n${user.name}`;
+      const text =
+        customPrompt ||
+        promptConfig.promptText;
 
-    const lower = text.toLowerCase();
-    if (lower.includes('meeting') || lower.includes('schedule a meeting')) {
-      rec = 'team@company.com';
-      pur = 'Schedule Team Meeting';
-      subj = 'Meeting Invitation: Sprint Review & Planning';
-      points = ['Sprint deliverables review', 'Upcoming milestone timelines', 'Q&A session'];
-      dt = 'Tomorrow at 10:00 AM';
-      bodyText = `Hi Team,\n\nI would like to invite everyone for our sprint review meeting scheduled for tomorrow at 10:00 AM.\n\nAgenda items include checking deliverables, unblocking hurdles, and scheduling upcoming milestones.\n\nPlease confirm your availability.\n\nBest regards,\n${user.name}`;
-    } else if (lower.includes('follow up') || lower.includes('follow-up')) {
-      rec = 'hr@company.com';
-      pur = 'Follow Up on Interview';
-      subj = 'Following Up on Recent Interview - Application Status';
-      points = ['Inquire on next steps', 'Reiterate enthusiasm', 'Available for further details'];
-      dt = 'This week';
-      bodyText = `Dear Hiring Team,\n\nI hope you are doing well. I am following up on my recent interview round for the Software Engineer role.\n\nI remain very enthusiastic about joining the team and would love to hear about the next steps.\n\nThank you for your time.\n\nWarm regards,\n${user.name}`;
-    } else if (lower.includes('project update') || lower.includes('update')) {
-      rec = 'team@company.com';
-      pur = 'Share Project Progress';
-      subj = 'Project Update: Milestone 3 Completed';
-      points = ['Core frontend architecture ready', 'API integration in progress', 'Deployment ahead of schedule'];
-      dt = 'Today';
-      bodyText = `Hi Team,\n\nHere is the latest progress report on our project. Milestone 3 has been completed and test runs have passed without blockers.\n\nPlease let me know if you have any suggestions.\n\nBest regards,\n${user.name}`;
-    }
+      let rec =
+        'professor@pec.edu.in';
 
-    await new Promise((r) => setTimeout(r, 700));
+      let pur =
+        'Request for leave';
 
-    setIntentData({
-      recipient: rec,
-      purpose: pur,
-      tone: promptConfig.tone,
-      dateTime: dt,
-      keyPoints: points,
-    });
+      let subj =
+        'Request for Leave Tomorrow';
 
-    setGeneratedDraft({
-      to: rec,
-      subject: subj,
-      body: bodyText,
-    });
+      let points = [
+        'Health issues',
+        'Need rest',
+        'Will complete pending work',
+      ];
 
-    setIsGeneratingAI(false);
-  };
+      let dt =
+        'Tomorrow (Auto-detected)';
+
+      let bodyText = `Dear Sir/Madam,
+
+I hope you are doing well. I am writing to request permission for leave tomorrow due to health issues. I am currently not feeling well and need to take rest for a speedy recovery.
+
+I will make sure to complete any pending work and stay updated with the class materials.
+
+Thank you for your understanding.
+
+Yours sincerely,
+${user.name}`;
+
+      const lower =
+        text.toLowerCase();
+
+      if (
+        lower.includes('meeting') ||
+        lower.includes(
+          'schedule a meeting'
+        )
+      ) {
+        rec =
+          'team@company.com';
+
+        pur =
+          'Schedule Team Meeting';
+
+        subj =
+          'Meeting Invitation: Sprint Review & Planning';
+
+        points = [
+          'Sprint deliverables review',
+          'Upcoming milestone timelines',
+          'Q&A session',
+        ];
+
+        dt =
+          'Tomorrow at 10:00 AM';
+
+        bodyText = `Hi Team,
+
+I would like to invite everyone for our sprint review meeting scheduled for tomorrow at 10:00 AM.
+
+Agenda items include checking deliverables, unblocking hurdles, and scheduling upcoming milestones.
+
+Please confirm your availability.
+
+Best regards,
+${user.name}`;
+      } else if (
+        lower.includes('follow up') ||
+        lower.includes('follow-up')
+      ) {
+        rec =
+          'hr@company.com';
+
+        pur =
+          'Follow Up on Interview';
+
+        subj =
+          'Following Up on Recent Interview - Application Status';
+
+        points = [
+          'Inquire on next steps',
+          'Reiterate enthusiasm',
+          'Available for further details',
+        ];
+
+        dt =
+          'This week';
+
+        bodyText = `Dear Hiring Team,
+
+I hope you are doing well. I am following up on my recent interview round for the Software Engineer role.
+
+I remain very enthusiastic about joining the team and would love to hear about the next steps.
+
+Thank you for your time.
+
+Warm regards,
+${user.name}`;
+      } else if (
+        lower.includes('project update') ||
+        lower.includes('update')
+      ) {
+        rec =
+          'team@company.com';
+
+        pur =
+          'Share Project Progress';
+
+        subj =
+          'Project Update: Milestone 3 Completed';
+
+        points = [
+          'Core frontend architecture ready',
+          'API integration in progress',
+          'Deployment ahead of schedule',
+        ];
+
+        dt = 'Today';
+
+        bodyText = `Hi Team,
+
+Here is the latest progress report on our project. Milestone 3 has been completed and test runs have passed without blockers.
+
+Please let me know if you have any suggestions.
+
+Best regards,
+${user.name}`;
+      }
+
+      await new Promise((r) =>
+        setTimeout(r, 700)
+      );
+
+      setIntentData({
+        recipient: rec,
+        purpose: pur,
+        tone: promptConfig.tone,
+        dateTime: dt,
+        keyPoints: points,
+      });
+
+      setGeneratedDraft((prev) => ({
+        ...prev,
+        to: rec,
+        subject: subj,
+        body: bodyText,
+        attachments: prev.attachments ?? [],
+      }));
+
+      setIsGeneratingAI(false);
+    };
 
   const saveDraft = async (email: {
     to: string;
     subject: string;
     body: string;
+    attachments?: EmailAttachment[];
   }) => {
-    const result = await createEmail({
-      to: email.to,
-      subject: email.subject,
-      body: email.body,
-      scheduled_at: null,
-    });
+    const result =
+      await createEmail({
+        to: email.to,
+        subject: email.subject,
+        body: email.body,
+        attachments:
+          email.attachments ?? [],
+        scheduled_at: null,
+      });
 
     showToast(
       'Draft Saved',
@@ -564,18 +997,21 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return result.email.id;
   };
 
-    const updateDraft = async (
+  const updateDraft = async (
     id: string,
     email: {
       to: string;
       subject: string;
       body: string;
+      attachments?: EmailAttachment[];
     }
   ) => {
     await updateEmail(id, {
       to: email.to,
       subject: email.subject,
       body: email.body,
+      attachments:
+        email.attachments,
     });
 
     await loadEmailsFromBackend();
@@ -586,7 +1022,9 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  const deleteDraft = async (id: string) => {
+  const deleteDraft = async (
+    id: string
+  ) => {
     await deleteEmail(id);
 
     await loadEmailsFromBackend();
@@ -598,7 +1036,8 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-  const completeScheduleOrSend = async (
+  const completeScheduleOrSend =
+    async (
       overrideConfig?: Partial<ScheduleConfig>
     ): Promise<string> => {
       const effective = {
@@ -606,64 +1045,67 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...(overrideConfig || {}),
       };
 
-      console.log('DEBUG generatedDraft before send/schedule:', generatedDraft);
+      console.log(
+        'DEBUG generatedDraft before send/schedule:',
+        generatedDraft
+      );
 
-      const isNow = effective.sendType === 'now';
+      const isNow =
+        effective.sendType === 'now';
 
       try {
-        let emailId = currentEmailId;
+        let emailId =
+          currentEmailId;
 
-        /*
-        * STEP 1:
-        * If this is an existing draft, update it with
-        * the latest changes from Review & Edit.
-        */
         if (emailId) {
-          await updateEmail(emailId, {
-            to: generatedDraft.to,
-            subject: generatedDraft.subject,
-            body: generatedDraft.body,
-          });
+          await updateEmail(
+            emailId,
+            {
+              to: generatedDraft.to,
+              subject:
+                generatedDraft.subject,
+              body: generatedDraft.body,
+              attachments:
+                generatedDraft.attachments,
+            }
+          );
         }
 
-        /*
-        * STEP 2:
-        * If this is a newly generated email and it has not
-        * been saved as a draft, create it in Firestore.
-        */
         if (!emailId) {
-          const result = await createEmail({
-            to: generatedDraft.to,
-            subject: generatedDraft.subject,
-            body: generatedDraft.body,
-            scheduled_at: null,
-          });
+          const result =
+            await createEmail({
+              to: generatedDraft.to,
+              subject:
+                generatedDraft.subject,
+              body: generatedDraft.body,
+              attachments:
+                generatedDraft.attachments,
+              scheduled_at: null,
+            });
 
-          emailId = result.email.id;
+          emailId =
+            result.email.id;
 
-          setCurrentEmailId(emailId);
+          setCurrentEmailId(
+            emailId
+          );
         }
 
-        /*
-        * STEP 3:
-        * SEND NOW
-        */
         if (isNow) {
           await sendEmail(emailId);
 
-          /*
-          * Reload emails from Firestore so the UI reflects
-          * the real SENT status.
-          */
           await loadEmailsFromBackend();
+
           setCurrentEmailId(null);
 
           addActivity({
             type: 'sent',
             title: 'Email sent',
-            description: `${generatedDraft.subject} to ${generatedDraft.to}`,
+            description:
+              `${generatedDraft.subject} to ${generatedDraft.to}`,
             timestamp: 'Just now',
-            iconBg: 'bg-emerald-100 text-emerald-600',
+            iconBg:
+              'bg-emerald-100 text-emerald-600',
           });
 
           showToast(
@@ -674,22 +1116,26 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return emailId;
         }
 
-        /*
-        * SCHEDULE FOR LATER
-        */
         if (!effective.scheduledAt) {
           throw new Error(
             'Scheduled date and time are required.'
           );
         }
 
-        await updateEmail(emailId, {
-          to: generatedDraft.to,
-          subject: generatedDraft.subject,
-          body: generatedDraft.body,
-          scheduled_at: effective.scheduledAt,
-          status: 'SCHEDULED',
-        });
+        await updateEmail(
+          emailId,
+          {
+            to: generatedDraft.to,
+            subject:
+              generatedDraft.subject,
+            body: generatedDraft.body,
+            attachments:
+              generatedDraft.attachments,
+            scheduled_at:
+              effective.scheduledAt,
+            status: 'SCHEDULED',
+          }
+        );
 
         await loadEmailsFromBackend();
 
@@ -698,9 +1144,11 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         addActivity({
           type: 'scheduled',
           title: 'Email scheduled',
-          description: `${generatedDraft.subject} to ${generatedDraft.to}`,
+          description:
+            `${generatedDraft.subject} to ${generatedDraft.to}`,
           timestamp: 'Just now',
-          iconBg: 'bg-purple-100 text-purple-600',
+          iconBg:
+            'bg-purple-100 text-purple-600',
         });
 
         showToast(
@@ -709,7 +1157,6 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         );
 
         return emailId;
-
       } catch (error) {
         console.error(
           'Failed to complete email action:',
@@ -728,129 +1175,217 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
-  const toggleStarInbox = (id: string) => {
+  const toggleStarInbox = (
+    id: string
+  ) => {
     setInboxEmails((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, isStarred: !item.isStarred } : item))
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              isStarred:
+                !item.isStarred,
+            }
+          : item
+      )
     );
-    if (selectedInboxEmail?.id === id) {
-      setSelectedInboxEmail((prev) => (prev ? { ...prev, isStarred: !prev.isStarred } : null));
+
+    if (
+      selectedInboxEmail?.id === id
+    ) {
+      setSelectedInboxEmail(
+        (prev) =>
+          prev
+            ? {
+                ...prev,
+                isStarred:
+                  !prev.isStarred,
+              }
+            : null
+      );
     }
   };
 
-  const toggleReadInbox = (id: string) => {
+  const toggleReadInbox = (
+    id: string
+  ) => {
     setInboxEmails((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, isUnread: !item.isUnread } : item))
+      prev.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              isUnread:
+                !item.isUnread,
+            }
+          : item
+      )
     );
   };
 
-  const deleteInboxEmail = (id: string) => {
-    setInboxEmails((prev) => prev.filter((item) => item.id !== id));
-    if (selectedInboxEmail?.id === id) {
-      const remaining = inboxEmails.filter((i) => i.id !== id);
-      setSelectedInboxEmail(remaining.length > 0 ? remaining[0] : null);
+  const deleteInboxEmail = (
+    id: string
+  ) => {
+    setInboxEmails((prev) =>
+      prev.filter(
+        (item) => item.id !== id
+      )
+    );
+
+    if (
+      selectedInboxEmail?.id === id
+    ) {
+      setSelectedInboxEmail(
+        null
+      );
     }
-    showToast('Email Deleted', 'Email moved to Trash.', 'info');
+
+    showToast(
+      'Email Deleted',
+      'Email moved to Trash.',
+      'info'
+    );
   };
 
   const syncInbox = () => {
     setIsSyncing(true);
+
     setTimeout(() => {
       setIsSyncing(false);
-      showToast('Inbox Synced', 'All latest emails fetched from Gmail.');
+
+      showToast(
+        'Inbox Synced',
+        'All latest emails fetched from Gmail.'
+      );
     }, 900);
   };
 
-  const addScheduledEmail = (email: Omit<EmailItem, 'id'>) => {
-    const item: EmailItem = { ...email, id: `sch-${Date.now()}` };
-    setScheduledEmails((prev) => [item, ...prev]);
+  const addScheduledEmail = (
+    email: Omit<
+      BackendEmailItem,
+      'id'
+    >
+  ) => {
+    const item: BackendEmailItem = {
+      ...email,
+      id: `sch-${Date.now()}`,
+    };
+
+    setScheduledEmails(
+      (prev) => [item, ...prev]
+    );
   };
 
-  const deleteScheduledEmail = async (id: string) => {
-    try {
-      await deleteEmail(id);
+  const deleteScheduledEmail =
+    async (id: string) => {
+      try {
+        await deleteEmail(id);
 
-      await loadEmailsFromBackend();
+        await loadEmailsFromBackend();
 
-      showToast(
-        'Scheduled Email Cancelled',
-        'The email was removed from the schedule.',
-        'info'
-      );
-    } catch (error) {
-      console.error(
-        'Failed to cancel scheduled email:',
-        error
-      );
+        showToast(
+          'Scheduled Email Cancelled',
+          'The email was removed from the schedule.',
+          'info'
+        );
+      } catch (error) {
+        console.error(
+          'Failed to cancel scheduled email:',
+          error
+        );
 
-      showToast(
-        'Cancellation Failed',
-        error instanceof Error
-          ? error.message
-          : 'Failed to cancel scheduled email.',
-        'error'
-      );
-    }
+        showToast(
+          'Cancellation Failed',
+          error instanceof Error
+            ? error.message
+            : 'Failed to cancel scheduled email.',
+          'error'
+        );
+      }
+    };
+
+  const addSentEmail = (
+    email: Omit<
+      BackendEmailItem,
+      'id'
+    >
+  ) => {
+    const item: BackendEmailItem = {
+      ...email,
+      id: `sent-${Date.now()}`,
+    };
+
+    setSentEmails(
+      (prev) => [item, ...prev]
+    );
   };
 
-  const addSentEmail = (email: Omit<EmailItem, 'id'>) => {
-    const item: EmailItem = { ...email, id: `sent-${Date.now()}` };
-    setSentEmails((prev) => [item, ...prev]);
-  };
+  const deleteSentEmail =
+    async (id: string) => {
+      try {
+        await deleteEmail(id);
 
-  const deleteSentEmail = async (id: string) => {
-    try {
-      await deleteEmail(id);
+        await loadEmailsFromBackend();
 
-      await loadEmailsFromBackend();
+        showToast(
+          'Sent Email Deleted',
+          'The sent email has been deleted.',
+          'info'
+        );
+      } catch (error) {
+        console.error(
+          'Failed to delete sent email:',
+          error
+        );
 
-      showToast(
-        'Sent Email Deleted',
-        'The sent email has been deleted.',
-        'info'
-      );
-    } catch (error) {
-      console.error(
-        'Failed to delete sent email:',
-        error
-      );
-
-      showToast(
-        'Delete Failed',
-        error instanceof Error
-          ? error.message
-          : 'Failed to delete sent email.',
-        'error'
-      );
-    }
-  };
+        showToast(
+          'Delete Failed',
+          error instanceof Error
+            ? error.message
+            : 'Failed to delete sent email.',
+          'error'
+        );
+      }
+    };
 
   const addTemplate = async (
-    tpl: Omit<EmailTemplate, 'id'>
+    tpl: Omit<
+      EmailTemplate,
+      'id'
+    >
   ) => {
     try {
-      const response = await createTemplate({
-        name: tpl.name,
-        subject: tpl.subject,
-        description: tpl.description,
-        category: tpl.category,
-        body: tpl.body,
-        isDefault: tpl.isDefault,
-        iconBg: tpl.iconBg,
-      });
+      const response =
+        await createTemplate({
+          name: tpl.name,
+          subject: tpl.subject,
+          description:
+            tpl.description,
+          category: tpl.category,
+          body: tpl.body,
+          isDefault:
+            tpl.isDefault,
+          iconBg: tpl.iconBg,
+        });
 
-      const savedTemplate = response.template;
+      const savedTemplate =
+        response.template;
 
-      setTemplates((prev) => [
-        savedTemplate,
-        ...prev,
-      ]);
+      setTemplates(
+        (prev) => [
+          savedTemplate,
+          ...prev,
+        ]
+      );
 
       addActivity({
         type: 'template',
         title: 'Template created',
-        description: `${tpl.name} Template`,
-        timestamp: 'Just now',
-        iconBg: 'bg-rose-100 text-rose-600',
+        description:
+          `${tpl.name} Template`,
+        timestamp:
+          'Just now',
+        iconBg:
+          'bg-rose-100 text-rose-600',
       });
 
       showToast(
@@ -858,7 +1393,10 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         `"${tpl.name}" is now available in your template library.`
       );
     } catch (error) {
-      console.error('Failed to create template:', error);
+      console.error(
+        'Failed to create template:',
+        error
+      );
 
       showToast(
         'Template Save Failed',
@@ -870,33 +1408,40 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-
   const updateTemplate = async (
     id: string,
     tpl: Partial<EmailTemplate>
   ) => {
     try {
-      const response = await updateTemplateRequest(
-        id,
-        {
-          name: tpl.name,
-          subject: tpl.subject,
-          description: tpl.description,
-          category: tpl.category,
-          body: tpl.body,
-          isDefault: tpl.isDefault,
-          iconBg: tpl.iconBg,
-        }
-      );
+      const response =
+        await updateTemplateRequest(
+          id,
+          {
+            name: tpl.name,
+            subject:
+              tpl.subject,
+            description:
+              tpl.description,
+            category:
+              tpl.category,
+            body: tpl.body,
+            isDefault:
+              tpl.isDefault,
+            iconBg:
+              tpl.iconBg,
+          }
+        );
 
-      const updatedTemplate = response.template;
+      const updatedTemplate =
+        response.template;
 
-      setTemplates((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? updatedTemplate
-            : item
-        )
+      setTemplates(
+        (prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? updatedTemplate
+              : item
+          )
       );
 
       showToast(
@@ -904,7 +1449,10 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         'Template changes have been saved.'
       );
     } catch (error) {
-      console.error('Failed to update template:', error);
+      console.error(
+        'Failed to update template:',
+        error
+      );
 
       showToast(
         'Template Update Failed',
@@ -916,13 +1464,19 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-
-  const deleteTemplate = async (id: string) => {
+  const deleteTemplate = async (
+    id: string
+  ) => {
     try {
-      await deleteTemplateRequest(id);
+      await deleteTemplateRequest(
+        id
+      );
 
-      setTemplates((prev) =>
-        prev.filter((item) => item.id !== id)
+      setTemplates(
+        (prev) =>
+          prev.filter(
+            (item) => item.id !== id
+          )
       );
 
       showToast(
@@ -931,7 +1485,10 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         'info'
       );
     } catch (error) {
-      console.error('Failed to delete template:', error);
+      console.error(
+        'Failed to delete template:',
+        error
+      );
 
       showToast(
         'Template Delete Failed',
@@ -943,9 +1500,72 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  const addActivity = (act: Omit<ActivityItem, 'id'>) => {
-    const item: ActivityItem = { ...act, id: `act-${Date.now()}` };
-    setActivities((prev) => [item, ...prev]);
+  const addActivity = (
+    act: Omit<
+      ActivityItem,
+      'id'
+    >
+  ) => {
+    const item: ActivityItem = {
+      ...act,
+      id: `act-${Date.now()}`,
+    };
+
+    setActivities(
+      (prev) => [item, ...prev]
+    );
+  };
+
+  const addContact = async (
+    data: ContactCreate
+  ) => {
+    const contact =
+      await createContact(data);
+
+    setContacts(
+      (prev) => [
+        contact,
+        ...prev,
+      ]
+    );
+
+    return contact;
+  };
+
+  const editContact = async (
+    id: string,
+    data: ContactUpdate
+  ) => {
+    const updatedContact =
+      await updateContact(
+        id,
+        data
+      );
+
+    setContacts(
+      (prev) =>
+        prev.map((contact) =>
+          contact.id === id
+            ? updatedContact
+            : contact
+        )
+    );
+
+    return updatedContact;
+  };
+
+  const removeContact = async (
+    id: string
+  ) => {
+    await deleteContact(id);
+
+    setContacts(
+      (prev) =>
+        prev.filter(
+          (contact) =>
+            contact.id !== id
+        )
+    );
   };
 
   return (
@@ -987,6 +1607,11 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         deleteTemplate,
         activities,
         addActivity,
+        contacts,
+        loadContacts,
+        addContact,
+        editContact,
+        removeContact,
         isGmailConnected,
         connectGmail,
         disconnectGmail,
@@ -1006,10 +1631,16 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 };
 
-export const useEmailContext = () => {
-  const context = useContext(EmailContext);
-  if (!context) {
-    throw new Error('useEmailContext must be used within an EmailProvider');
-  }
-  return context;
-};
+export const useEmailContext =
+  () => {
+    const context =
+      useContext(EmailContext);
+
+    if (!context) {
+      throw new Error(
+        'useEmailContext must be used within an EmailProvider'
+      );
+    }
+
+    return context;
+  };

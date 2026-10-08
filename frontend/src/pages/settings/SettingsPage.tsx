@@ -7,7 +7,6 @@ import {
   Mail,
   Shield,
   Palette,
-  Camera,
   Check,
 } from 'lucide-react';
 import { useEmailContext } from '../../context/EmailContext';
@@ -100,13 +99,6 @@ export const SettingsPage: React.FC = () => {
                 <div className="w-20 h-20 rounded-full bg-gradient-to-tr from-[#635BFF] to-[#7C3AED] text-white text-3xl font-bold flex items-center justify-center shadow-md">
                   {user.avatar || 'A'}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => alert('Change profile photo!')}
-                  className="absolute bottom-0 right-0 p-1.5 rounded-full bg-white text-[#635BFF] border border-slate-200 shadow-sm hover:scale-110 transition-transform"
-                >
-                  <Camera className="w-3.5 h-3.5" />
-                </button>
               </div>
 
               <div>
