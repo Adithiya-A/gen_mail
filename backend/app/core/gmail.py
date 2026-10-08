@@ -19,7 +19,10 @@ GOOGLE_REDIRECT_URI = os.getenv(
 )
 
 GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.send"
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid",
+    "https://www.googleapis.com/auth/gmail.readonly",
 ]
 
 def get_gmail_service(gmail_data: dict):

@@ -6,6 +6,11 @@ import {
   deleteEmail,
   sendEmail,
 } from '../services/emailService';
+import {
+  connectGmail as requestGmailConnection,
+  getGmailStatus,
+  disconnectGmail as requestGmailDisconnection,
+} from '../services/gmailService';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import {
@@ -93,6 +98,7 @@ interface EmailContextType {
 
   sentEmails: EmailItem[];
   addSentEmail: (email: Omit<EmailItem, 'id'>) => void;
+  deleteSentEmail: (id: string) => Promise<void>;
 
   trackingEmails: EmailItem[];
   templates: EmailTemplate[];
@@ -105,8 +111,8 @@ interface EmailContextType {
 
   // Gmail OAuth State
   isGmailConnected: boolean;
-  connectGmail: (email?: string) => void;
-  disconnectGmail: () => void;
+  connectGmail: () => Promise<string>;
+  disconnectGmail: () => Promise<void>;
 
   // AI Pipeline Actions
   generateEmailFromPrompt: (customPrompt?: string) => Promise<void>;
@@ -135,7 +141,7 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const [user, setUser] = useState<UserProfile>(initialUser);
   const [stats, setStats] = useState(initialStats);
-  const [isGmailConnected, setIsGmailConnected] = useState<boolean>(true);
+  const [isGmailConnected, setIsGmailConnected] = useState<boolean>(false);
 
   // Workflow states
   const [promptConfig, setPromptConfig] = useState<PromptConfig>({
@@ -291,10 +297,42 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       auth,
       async (firebaseUser) => {
         if (!firebaseUser) {
+          setIsGmailConnected(false);
           return;
         }
 
         await loadEmailsFromBackend();
+
+        try {
+          const gmailStatus = await getGmailStatus();
+
+          setIsGmailConnected(Boolean(gmailStatus.connected));
+
+          setUser((prev) => ({
+            ...prev,
+            isConnected: Boolean(gmailStatus.connected),
+            connectedGmail: gmailStatus.email || '',
+            connectedDate: gmailStatus.connected_at
+              ? new Date(gmailStatus.connected_at).toLocaleDateString('en-US', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })
+              : '',
+          }));
+        } catch (error) {
+          console.error(
+            'Failed to load Gmail connection status:',
+            error
+          );
+
+          setIsGmailConnected(false);
+
+          setUser((prev) => ({
+            ...prev,
+            isConnected: false,
+          }));
+        }
       }
     );
 
@@ -318,21 +356,41 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     showToast('Profile Updated', 'Your profile changes have been saved successfully.');
   };
 
-  const connectGmail = (email = 'aarthi@gmail.com') => {
-    setIsGmailConnected(true);
-    setUser((prev) => ({
-      ...prev,
-      connectedGmail: email,
-      connectedDate: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }),
-      isConnected: true,
-    }));
-    showToast('Gmail Connected', `Successfully linked to ${email}`);
+  const connectGmail = async (): Promise<string> => {
+    return await requestGmailConnection();
   };
 
-  const disconnectGmail = () => {
-    setIsGmailConnected(false);
-    setUser((prev) => ({ ...prev, isConnected: false, connectedGmail: '' }));
-    showToast('Gmail Disconnected', 'Your Gmail account has been disconnected.', 'info');
+  const disconnectGmail = async (): Promise<void> => {
+    try {
+      await requestGmailDisconnection();
+
+      setIsGmailConnected(false);
+
+      setUser((prev) => ({
+        ...prev,
+        isConnected: false,
+        connectedGmail: '',
+        connectedDate: '',
+      }));
+
+      showToast(
+        'Gmail Disconnected',
+        'Your Gmail account has been disconnected.',
+        'info'
+      );
+    } catch (error) {
+      console.error('Failed to disconnect Gmail:', error);
+
+      showToast(
+        'Gmail Disconnect Failed',
+        error instanceof Error
+          ? error.message
+          : 'Unable to disconnect Gmail.',
+        'error'
+      );
+
+      throw error;
+    }
   };
 
   const updateIntentItem = (key: keyof IntentData, val: any) => {
@@ -645,6 +703,33 @@ const completeScheduleOrSend = async (
     setSentEmails((prev) => [item, ...prev]);
   };
 
+  const deleteSentEmail = async (id: string) => {
+    try {
+      await deleteEmail(id);
+
+      await loadEmailsFromBackend();
+
+      showToast(
+        'Sent Email Deleted',
+        'The sent email has been deleted.',
+        'info'
+      );
+    } catch (error) {
+      console.error(
+        'Failed to delete sent email:',
+        error
+      );
+
+      showToast(
+        'Delete Failed',
+        error instanceof Error
+          ? error.message
+          : 'Failed to delete sent email.',
+        'error'
+      );
+    }
+  };
+
   const addTemplate = (tpl: Omit<EmailTemplate, 'id'>) => {
     const item: EmailTemplate = { ...tpl, id: `tpl-${Date.now()}` };
     setTemplates((prev) => [item, ...prev]);
@@ -704,6 +789,7 @@ const completeScheduleOrSend = async (
         deleteDraft,
         sentEmails,
         addSentEmail,
+        deleteSentEmail,
         trackingEmails,
         templates,
         addTemplate,

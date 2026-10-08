@@ -3,7 +3,9 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 from firebase_admin import firestore
+from datetime import datetime, timezone
 
 from app.auth.dependencies import get_current_user
 from app.core.gmail import (
@@ -108,11 +110,49 @@ def gmail_status(
 
     return {
         "connected": gmail_data.get("connected", False),
+        "email": gmail_data.get("email", ""),
+        "connected_at": gmail_data.get("connected_at"),
         "message": (
             "Gmail is connected"
             if gmail_data.get("connected", False)
             else "Gmail is not connected"
         ),
+    }
+
+@router.post("/disconnect")
+def gmail_disconnect(
+    current_user: dict = Depends(get_current_user),
+):
+    firebase_uid = current_user.get("uid")
+
+    if not firebase_uid:
+        raise HTTPException(
+            status_code=401,
+            detail="Firebase user ID is missing",
+        )
+
+    db = firestore.client()
+
+    gmail_ref = (
+        db.collection("users")
+        .document(firebase_uid)
+        .collection("gmail")
+        .document("connection")
+    )
+
+    gmail_doc = gmail_ref.get()
+
+    if not gmail_doc.exists:
+        return {
+            "connected": False,
+            "message": "Gmail is already disconnected",
+        }
+
+    gmail_ref.delete()
+
+    return {
+        "connected": False,
+        "message": "Gmail disconnected successfully",
     }
 
 
@@ -154,6 +194,18 @@ def gmail_oauth_callback(code: str, state: str):
 
     credentials = flow.credentials
 
+    gmail_service = build(
+        "gmail",
+        "v1",
+        credentials=credentials,
+    )
+
+    profile = gmail_service.users().getProfile(
+        userId="me"
+    ).execute()
+
+    gmail_email = profile.get("emailAddress", "")
+
     db = firestore.client()
 
     gmail_ref = (
@@ -169,12 +221,12 @@ def gmail_oauth_callback(code: str, state: str):
         "token_uri": credentials.token_uri,
         "scopes": credentials.scopes,
         "connected": True,
+        "email": gmail_email,
+        "connected_at": datetime.now(timezone.utc).isoformat(),
     }
 
     gmail_ref.set(gmail_data, merge=True)
 
-    return {
-        "message": "Gmail connected successfully",
-        "firebase_uid": firebase_uid,
-        "scopes": credentials.scopes,
-    }
+    return RedirectResponse(
+        url="http://localhost:5173/settings/gmail"
+    )

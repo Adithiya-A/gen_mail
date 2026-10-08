@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   Send,
@@ -12,17 +13,28 @@ import {
   Calendar,
   Star,
   GraduationCap,
+  Trash2,
+  Eye,
 } from 'lucide-react';
 import { useEmailContext } from '../../context/EmailContext';
 import { StatusBadge } from '../../components/common/StatusBadge';
 
 export const SentEmailsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { sentEmails } = useEmailContext();
+  const { sentEmails, deleteSentEmail } = useEmailContext();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('Last 30 days');
   const [sortAsc, setSortAsc] = useState(false);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number;
+    left: number;
+  }>({
+    top: 0,
+    left: 0,
+  });
 
   const filtered = sentEmails.filter((item) => {
     return (
@@ -115,8 +127,8 @@ export const SentEmailsPage: React.FC = () => {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filtered.map((item) => (
+              <React.Fragment key={item.id}>
                 <tr
-                  key={item.id}
                   onClick={() => navigate(`/emails/${item.id}`)}
                   className="hover:bg-[#F8F9FE] transition-colors cursor-pointer group"
                 >
@@ -141,13 +153,86 @@ export const SentEmailsPage: React.FC = () => {
                   </td>
                   <td className="py-4 text-right" onClick={(e) => e.stopPropagation()}>
                     <button
-                      onClick={() => navigate(`/emails/${item.id}`)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+
+                        if (activeMenuId === item.id) {
+                          setActiveMenuId(null);
+                          return;
+                        }
+
+                        const rect = e.currentTarget.getBoundingClientRect();
+
+                        const menuWidth = 160;
+                        const menuHeight = 100;
+                        const spacing = 6;
+
+                        let left = rect.right - menuWidth;
+                        let top = rect.bottom + spacing;
+
+                        if (left < 8) {
+                          left = 8;
+                        }
+
+                        if (left + menuWidth > window.innerWidth - 8) {
+                          left = window.innerWidth - menuWidth - 8;
+                        }
+
+                        if (top + menuHeight > window.innerHeight - 8) {
+                          top = rect.top - menuHeight - spacing;
+                        }
+
+                        if (top < 8) {
+                          top = 8;
+                        }
+
+                        setMenuPosition({ top, left });
+                        setActiveMenuId(item.id);
+                      }}
                       className="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
                   </td>
                 </tr>
+
+                {activeMenuId === item.id &&
+                  createPortal(
+                    <div
+                      className="fixed z-[9999] w-40 rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+                      style={{
+                        top: menuPosition.top,
+                        left: menuPosition.left,
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveMenuId(null);
+                          navigate(`/emails/${item.id}`);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                      >
+                        <Eye className="h-4 w-4" />
+                        View Details
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setActiveMenuId(null);
+                          await deleteSentEmail(item.id);
+                        }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Delete
+                      </button>
+                    </div>,
+                    document.body
+                  )}
+                  </React.Fragment>
               ))}
             </tbody>
           </table>

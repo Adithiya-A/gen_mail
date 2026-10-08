@@ -63,18 +63,24 @@ export const GmailIntegrationPage: React.FC = () => {
                       <StatusBadge status="connected" size="sm" />
                     </div>
                     <h3 className="text-sm font-bold text-[#13182E] mt-1">
-                      {user.connectedGmail || 'aarthi@gmail.com'}
+                      {user.connectedGmail || 'Gmail account'}
                     </h3>
                     <p className="text-[11px] text-[#64748B]">
-                      Connected on {user.connectedDate || '10 Sep 2025'}
+                      {user.connectedDate ? `Connected on ${user.connectedDate}` : 'Connected'}
                     </p>
                   </div>
                 </div>
 
                 <button
                   type="button"
-                  onClick={disconnectGmail}
-                  className="px-4 py-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold border border-rose-200 transition-colors"
+                  onClick={async () => {
+                    try {
+                      await disconnectGmail();
+                    } catch {
+                      // Error is already handled by EmailContext.
+                    }
+                  }}
+                  className="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 hover:border-red-300 transition-colors"
                 >
                   Disconnect
                 </button>
@@ -90,7 +96,15 @@ export const GmailIntegrationPage: React.FC = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => connectGmail()}
+                  onClick={async () => {
+                    try {
+                      const authorizationUrl = await connectGmail();
+
+                      window.location.href = authorizationUrl;
+                    } catch (error) {
+                      console.error('Failed to connect Gmail:', error);
+                    }
+                  }}
                   className="px-4 py-2 rounded-xl bg-[#635BFF] text-white hover:bg-[#5346E0] text-xs font-bold shadow-xs transition-colors"
                 >
                   Connect Now
