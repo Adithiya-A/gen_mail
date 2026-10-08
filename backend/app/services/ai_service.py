@@ -6,6 +6,33 @@ from google import genai
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PRIMARY_MODEL = "gemini-2.5-flash"
+FALLBACK_MODEL = "gemini-2.5-flash-lite"
+
+def generate_with_fallback(prompt: str):
+    try:
+        return client.models.generate_content(
+            model=PRIMARY_MODEL,
+            contents=prompt,
+        )
+
+    except Exception as primary_error:
+        print(
+            f"Primary Gemini model failed: {primary_error}"
+        )
+
+        try:
+            return client.models.generate_content(
+                model=FALLBACK_MODEL,
+                contents=prompt,
+            )
+
+        except Exception as fallback_error:
+            print(
+                f"Fallback Gemini model failed: {fallback_error}"
+            )
+
+            raise fallback_error
 
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY is not configured")
@@ -47,10 +74,7 @@ BODY:
 <email body>
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-    )
+    response = generate_with_fallback(prompt)
 
     return response.text
 
@@ -100,10 +124,7 @@ TONE: <tone>
 LENGTH: <length>
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=intent_prompt,
-    )
+    response = generate_with_fallback(intent_prompt)
 
     return response.text
 
@@ -165,9 +186,6 @@ BODY:
 <body>
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=intent_prompt,
-    )
+    response = generate_with_fallback(intent_prompt)
 
     return response.text

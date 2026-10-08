@@ -2,6 +2,31 @@ import { auth } from '../config/firebase';
 
 const API_URL = 'http://127.0.0.1:8000';
 
+const getApiErrorMessage = async (
+  response: Response,
+  fallbackMessage: string
+): Promise<string> => {
+  try {
+    const errorData = await response.json();
+
+    if (typeof errorData === 'string') {
+      return errorData;
+    }
+
+    if (errorData?.detail) {
+      return errorData.detail;
+    }
+
+    if (errorData?.message) {
+      return errorData.message;
+    }
+
+    return JSON.stringify(errorData);
+  } catch {
+    return response.statusText || fallbackMessage;
+  }
+};
+
 export interface CreateEmailData {
   to: string;
   cc?: string;
@@ -34,15 +59,14 @@ export const createEmail = async (
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-
-    console.error('Create email API error:', errorData);
-
-    throw new Error(
-      typeof errorData === 'string'
-        ? errorData
-        : JSON.stringify(errorData)
+    const errorMessage = await getApiErrorMessage(
+      response,
+      'Failed to create email'
     );
+
+    console.error('Create email API error:', errorMessage);
+
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -67,11 +91,12 @@ export const getEmails = async () => {
   });
 
   if (!response.ok) {
-    const errorData = await response.json();
-
-    throw new Error(
-      errorData.detail || 'Failed to fetch emails'
+    const errorMessage = await getApiErrorMessage(
+      response,
+      'Failed to fetch emails'
     );
+
+    throw new Error(errorMessage);
   }
 
   return response.json();
@@ -112,11 +137,12 @@ export const updateEmail = async (
   );
 
   if (!response.ok) {
-    const errorData = await response.json();
-
-    throw new Error(
-      errorData.detail || 'Failed to update email'
+    const errorMessage = await getApiErrorMessage(
+      response,
+      'Failed to update email'
     );
+
+    throw new Error(errorMessage);
   }
 
   return response.json();

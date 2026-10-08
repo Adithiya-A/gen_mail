@@ -30,12 +30,19 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
-  const todaySchedule = [
-    { time: '09:00 AM', title: 'Leave Request', recipient: 'professor@pec.edu.in' },
-    { time: '11:00 AM', title: 'Project Update', recipient: 'team@company.com' },
-    { time: '03:00 PM', title: 'Meeting Follow Up', recipient: 'mentor@pec.edu.in' },
-    { time: '05:30 PM', title: 'Thank You', recipient: 'recruiter@abc.com' },
-  ];
+  const today = new Date();
+
+  const todaysScheduledEmails = scheduledEmails.filter((item) => {
+    if (!item.scheduledAt) return false;
+
+    const scheduledDate = new Date(item.scheduledAt);
+
+    return (
+      scheduledDate.getFullYear() === today.getFullYear() &&
+      scheduledDate.getMonth() === today.getMonth() &&
+      scheduledDate.getDate() === today.getDate()
+    );
+  });
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto pb-10">
@@ -189,7 +196,14 @@ export const DashboardPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 <span className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-100 text-[11px] font-medium text-slate-700">
                   <Calendar className="w-3 h-3 text-[#635BFF]" />
-                  <span>Sat, 20 Sep 2026</span>
+                  <span>
+                    {new Date().toLocaleDateString(undefined, {
+                      weekday: 'short',
+                      day: '2-digit',
+                      month: 'short',
+                      year: 'numeric',
+                    })}
+                  </span>
                 </span>
                 <Link
                   to="/scheduled"
@@ -202,24 +216,47 @@ export const DashboardPage: React.FC = () => {
 
             {/* Time Slot Items */}
             <div className="flex flex-col gap-3.5 mt-4">
-              {todaySchedule.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between p-2 rounded-2xl hover:bg-[#F8F9FE] transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-2 h-2 rounded-full bg-[#3B82F6]" />
-                    <span className="text-xs font-bold text-[#13182E] w-20">{item.time}</span>
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-[#13182E]">{item.title}</span>
-                      <span className="text-[11px] text-[#64748B]">To: {item.recipient}</span>
-                    </div>
-                  </div>
-                  <button className="text-slate-400 hover:text-slate-600 p-1">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
+              {todaysScheduledEmails.length === 0 ? (
+                <div className="py-6 text-center">
+                  <p className="text-xs font-medium text-[#64748B]">
+                    No emails scheduled for today.
+                  </p>
                 </div>
-              ))}
+              ) : (
+                todaysScheduledEmails.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between p-2 rounded-2xl hover:bg-[#F8F9FE] transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-2 h-2 rounded-full bg-[#3B82F6]" />
+
+                      <span className="text-xs font-bold text-[#13182E] w-20">
+                        {item.scheduledTime
+                          ? new Date(item.scheduledTime).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : item.time}
+                      </span>
+
+                      <div className="flex flex-col">
+                        <span className="text-xs font-bold text-[#13182E]">
+                          {item.subject}
+                        </span>
+
+                        <span className="text-[11px] text-[#64748B]">
+                          To: {item.recipient}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button className="text-slate-400 hover:text-slate-600 p-1">
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

@@ -210,7 +210,7 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [sentEmails, setSentEmails] = useState<EmailItem[]>(initialSentEmails);
   const [trackingEmails, setTrackingEmails] = useState<EmailItem[]>(initialTrackingEmails);
   const [templates, setTemplates] = useState<EmailTemplate[]>(initialTemplates);
-  const [activities, setActivities] = useState<ActivityItem[]>(initialActivities);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
 
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [toasts, setToasts] = useState<ToastNotification[]>([]);
@@ -310,6 +310,63 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const loadActivitiesFromBackend = async () => {
+    try {
+      const result = await getEmails();
+      const backendEmails = result.emails || [];
+
+      const emailActivities: ActivityItem[] = backendEmails
+        .flatMap((email: any) => {
+          const activities: ActivityItem[] = [];
+
+          if (email.sent_at) {
+            activities.push({
+              id: `sent-${email.id}`,
+              type: 'sent',
+              title: 'Email sent',
+              description: `${email.subject} to ${email.to}`,
+              timestamp: new Date(email.sent_at).toLocaleString(),
+              iconBg: 'bg-emerald-100 text-emerald-600',
+            });
+          }
+
+          if (email.scheduled_at) {
+            activities.push({
+              id: `scheduled-${email.id}`,
+              type: 'scheduled',
+              title: 'Email scheduled',
+              description: `${email.subject} to ${email.to}`,
+              timestamp: new Date(email.scheduled_at).toLocaleString(),
+              iconBg: 'bg-purple-100 text-purple-600',
+            });
+          }
+
+          if (
+            email.status?.toLowerCase() === 'draft' &&
+            email.created_at
+          ) {
+            activities.push({
+              id: `draft-${email.id}`,
+              type: 'draft',
+              title: 'Draft saved',
+              description: email.subject,
+              timestamp: new Date(email.created_at).toLocaleString(),
+              iconBg: 'bg-amber-100 text-amber-600',
+            });
+          }
+
+          return activities;
+        });
+
+      setActivities(emailActivities);
+    } catch (error) {
+      console.error(
+        'Failed to load activities from backend:',
+        error
+      );
+    }
+  };
+
   const loadTemplatesFromBackend = async () => {
     try {
       const result = await getTemplates();
@@ -335,6 +392,7 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
 
         await loadEmailsFromBackend();
+        await loadActivitiesFromBackend();
         await loadTemplatesFromBackend();
 
         try {
@@ -540,133 +598,135 @@ export const EmailProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
   };
 
-const completeScheduleOrSend = async (
-    overrideConfig?: Partial<ScheduleConfig>
-  ): Promise<string> => {
-    const effective = {
-      ...scheduleConfig,
-      ...(overrideConfig || {}),
-    };
+  const completeScheduleOrSend = async (
+      overrideConfig?: Partial<ScheduleConfig>
+    ): Promise<string> => {
+      const effective = {
+        ...scheduleConfig,
+        ...(overrideConfig || {}),
+      };
 
-    const isNow = effective.sendType === 'now';
+      console.log('DEBUG generatedDraft before send/schedule:', generatedDraft);
 
-    try {
-      let emailId = currentEmailId;
+      const isNow = effective.sendType === 'now';
 
-      /*
-      * STEP 1:
-      * If this is an existing draft, update it with
-      * the latest changes from Review & Edit.
-      */
-      if (emailId) {
+      try {
+        let emailId = currentEmailId;
+
+        /*
+        * STEP 1:
+        * If this is an existing draft, update it with
+        * the latest changes from Review & Edit.
+        */
+        if (emailId) {
+          await updateEmail(emailId, {
+            to: generatedDraft.to,
+            subject: generatedDraft.subject,
+            body: generatedDraft.body,
+          });
+        }
+
+        /*
+        * STEP 2:
+        * If this is a newly generated email and it has not
+        * been saved as a draft, create it in Firestore.
+        */
+        if (!emailId) {
+          const result = await createEmail({
+            to: generatedDraft.to,
+            subject: generatedDraft.subject,
+            body: generatedDraft.body,
+            scheduled_at: null,
+          });
+
+          emailId = result.email.id;
+
+          setCurrentEmailId(emailId);
+        }
+
+        /*
+        * STEP 3:
+        * SEND NOW
+        */
+        if (isNow) {
+          await sendEmail(emailId);
+
+          /*
+          * Reload emails from Firestore so the UI reflects
+          * the real SENT status.
+          */
+          await loadEmailsFromBackend();
+          setCurrentEmailId(null);
+
+          addActivity({
+            type: 'sent',
+            title: 'Email sent',
+            description: `${generatedDraft.subject} to ${generatedDraft.to}`,
+            timestamp: 'Just now',
+            iconBg: 'bg-emerald-100 text-emerald-600',
+          });
+
+          showToast(
+            'Email Sent Successfully!',
+            `Delivered to ${generatedDraft.to} via Gmail.`
+          );
+
+          return emailId;
+        }
+
+        /*
+        * SCHEDULE FOR LATER
+        */
+        if (!effective.scheduledAt) {
+          throw new Error(
+            'Scheduled date and time are required.'
+          );
+        }
+
         await updateEmail(emailId, {
           to: generatedDraft.to,
           subject: generatedDraft.subject,
           body: generatedDraft.body,
-        });
-      }
-
-      /*
-      * STEP 2:
-      * If this is a newly generated email and it has not
-      * been saved as a draft, create it in Firestore.
-      */
-      if (!emailId) {
-        const result = await createEmail({
-          to: generatedDraft.to,
-          subject: generatedDraft.subject,
-          body: generatedDraft.body,
-          scheduled_at: null,
+          scheduled_at: effective.scheduledAt,
+          status: 'SCHEDULED',
         });
 
-        emailId = result.email.id;
-
-        setCurrentEmailId(emailId);
-      }
-
-      /*
-      * STEP 3:
-      * SEND NOW
-      */
-      if (isNow) {
-        await sendEmail(emailId);
-
-        /*
-        * Reload emails from Firestore so the UI reflects
-        * the real SENT status.
-        */
         await loadEmailsFromBackend();
+
         setCurrentEmailId(null);
 
         addActivity({
-          type: 'sent',
-          title: 'Email sent',
+          type: 'scheduled',
+          title: 'Email scheduled',
           description: `${generatedDraft.subject} to ${generatedDraft.to}`,
           timestamp: 'Just now',
-          iconBg: 'bg-emerald-100 text-emerald-600',
+          iconBg: 'bg-purple-100 text-purple-600',
         });
 
         showToast(
-          'Email Sent Successfully!',
-          `Delivered to ${generatedDraft.to} via Gmail.`
+          'Email Scheduled!',
+          `Queued for ${effective.date} at ${effective.time}`
         );
 
         return emailId;
-      }
 
-      /*
-      * SCHEDULE FOR LATER
-      */
-      if (!effective.scheduledAt) {
-        throw new Error(
-          'Scheduled date and time are required.'
+      } catch (error) {
+        console.error(
+          'Failed to complete email action:',
+          error
         );
+
+        showToast(
+          'Email Action Failed',
+          error instanceof Error
+            ? error.message
+            : 'Failed to process email.',
+          'error'
+        );
+
+        throw error;
       }
-
-      await updateEmail(emailId, {
-        to: generatedDraft.to,
-        subject: generatedDraft.subject,
-        body: generatedDraft.body,
-        scheduled_at: effective.scheduledAt,
-        status: 'SCHEDULED',
-      });
-
-      await loadEmailsFromBackend();
-
-      setCurrentEmailId(null);
-
-      addActivity({
-        type: 'scheduled',
-        title: 'Email scheduled',
-        description: `${generatedDraft.subject} to ${generatedDraft.to}`,
-        timestamp: 'Just now',
-        iconBg: 'bg-purple-100 text-purple-600',
-      });
-
-      showToast(
-        'Email Scheduled!',
-        `Queued for ${effective.date} at ${effective.time}`
-      );
-
-      return emailId;
-
-    } catch (error) {
-      console.error(
-        'Failed to complete email action:',
-        error
-      );
-
-      showToast(
-        'Email Action Failed',
-        error instanceof Error
-          ? error.message
-          : 'Failed to process email.',
-        'error'
-      );
-
-      throw error;
-    }
-  };
+    };
 
   const toggleStarInbox = (id: string) => {
     setInboxEmails((prev) =>
